@@ -1,0 +1,170 @@
+{
+  "ground_truth_available": false,
+  "accuracy": null,
+  "limitation": "Availability and discontinuities are not 3D accuracy; fewer jumps may result from more missing estimates.",
+  "common_named_coordinate_frames": 912,
+  "baseline": {
+    "expected_frames": 1932,
+    "reference": "cuboid_center",
+    "named_coordinate_frames": 1797,
+    "named_coverage_pct": 93.01242236024845,
+    "all_available_references": {
+      "approximate_bbox_ground_contact": 7,
+      "bbox_visual_center": 7,
+      "cuboid_center": 1797
+    },
+    "states": {
+      "lost": 121,
+      "observed": 1518,
+      "coasting": 293
+    },
+    "named_states": {
+      "observed": 1505,
+      "coasting": 292
+    },
+    "named_methods": {
+      "cuboid_multiview": 230,
+      "cuboid_singleview": 806,
+      "prediction": 292,
+      "bearing_update": 338,
+      "triangulated": 131
+    },
+    "resets": {
+      "unspecified_legacy_reset": 10
+    },
+    "missing_intervals": [
+      {
+        "first_frame": 0,
+        "last_frame": 32,
+        "frames": 33,
+        "duration_s": 1.1
+      },
+      {
+        "first_frame": 684,
+        "last_frame": 684,
+        "frames": 1,
+        "duration_s": 0.03333333333333333
+      },
+      {
+        "first_frame": 891,
+        "last_frame": 916,
+        "frames": 26,
+        "duration_s": 0.8666666666666667
+      },
+      {
+        "first_frame": 943,
+        "last_frame": 952,
+        "frames": 10,
+        "duration_s": 0.3333333333333333
+      },
+      {
+        "first_frame": 978,
+        "last_frame": 1042,
+        "frames": 65,
+        "duration_s": 2.1666666666666665
+      }
+    ],
+    "longest_missing_frames": 65,
+    "max_adjacent_step_m": 32.682201220356255,
+    "adjacent_steps_over_10m": [
+      {
+        "frame": 89,
+        "displacement_m": 13.195504571503282,
+        "delta_s": 0.0333333160800553,
+        "apparent_speed_m_s": 395.8653420443428,
+        "reset_reason": null,
+        "method": "cuboid_multiview"
+      },
+      {
+        "frame": 411,
+        "displacement_m": 12.052004412551282,
+        "delta_s": 0.0333333160800553,
+        "apparent_speed_m_s": 361.56031951956004,
+        "reset_reason": null,
+        "method": "cuboid_singleview"
+      },
+      {
+        "frame": 434,
+        "displacement_m": 26.228768445208196,
+        "delta_s": 0.0333333160800553,
+        "apparent_speed_m_s": 786.8634606354677,
+        "reset_reason": null,
+        "method": "cuboid_multiview"
+      },
+      {
+        "frame": 1834,
+        "displacement_m": 32.682201220356255,
+        "delta_s": 0.03333331608005352,
+        "apparent_speed_m_s": 980.4665440985966,
+        "reset_reason": null,
+        "method": "cuboid_singleview"
+      }
+    ]
+  },
+  "current": {
+    "expected_frames": 1932,
+    "reference": "cuboid_center",
+    "named_coordinate_frames": 916,
+    "named_coverage_pct": 47.4120082815735,
+    "all_available_references": {
+      "cuboid_center": 916
+    },
+    "states": {
+      "lost": 1016,
+      "observed": 829,
+      "coasting": 87
+    },
+    "named_states": {
+      "observed": 829,
+      "coasting": 87
+    },
+    "named_methods": {
+      "triangulated": 217,
+      "cuboid_multiview": 224,
+      "cuboid_singleview": 292,
+      "bearing_update": 96,
+      "prediction": 87
+    },
+    "resets": {
+      "consistent_multiview_pose": 2
+    },
+    "missing_intervals": [
+      {
+        "first_frame": 0,
+        "last_frame": 28,
+        "frames": 29,
+        "duration_s": 0.9666666666666667
+      },
+      {
+        "first_frame": 188,
+        "last_frame": 202,
+        "frames": 15,
+        "duration_s": 0.5
+      },
+      {
+        "first_frame": 220,
+        "last_frame": 1093,
+        "frames": 874,
+        "duration_s": 29.133333333333333
+      },
+      {
+        "first_frame": 1834,
+        "last_frame": 1931,
+        "frames": 98,
+        "duration_s": 3.2666666666666666
+      }
+    ],
+    "longest_missing_frames": 874,
+    "max_adjacent_step_m": 16.932248961132597,
+    "adjacent_steps_over_10m": [
+      {
+        "frame": 1737,
+        "displacement_m": 16.932248961132597,
+        "delta_s": 0.03333331608005352,
+        "apparent_speed_m_s": 507.96773175726025,
+        "reset_reason": "consistent_multiview_pose",
+        "method": "cuboid_multiview"
+      }
+    ]
+  }
+}
