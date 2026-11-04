@@ -12,12 +12,15 @@ from ultralytics import YOLO, settings
 
 
 class VehicleDetector:
-    def __init__(self, weights: Path, device='auto', image_size=960):
+    def __init__(self, weights: Path, device='auto', image_size=960, confidence=.20):
         settings.update({'sync': False})
         torch.set_num_threads(4)
         self.device = ('cuda:0' if torch.cuda.is_available() else
                        'mps' if torch.backends.mps.is_available() else 'cpu') if device == 'auto' else device
         self.image_size = image_size
+        if not 0 < confidence < 1:
+            raise ValueError('Confidence must be between zero and one')
+        self.confidence = confidence
         if not weights.is_file():
             raise FileNotFoundError(f'Missing model: {weights}. Run ./setup.sh first.')
         self.model = YOLO(str(weights))
@@ -28,7 +31,7 @@ class VehicleDetector:
             raise ValueError('Weights must expose a car, bus, truck or vehicle detection class')
 
     def predict(self, frames):
-        results = self.model.predict(frames, imgsz=self.image_size, conf=0.20,
+        results = self.model.predict(frames, imgsz=self.image_size, conf=self.confidence,
                                      classes=self.vehicle_classes, device=self.device,
                                      verbose=False, save=False)
         observations = []

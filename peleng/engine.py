@@ -67,12 +67,15 @@ def annotate(frame, track, camera_id, source_time, projected_point=None):
 class Engine:
     def __init__(self, data_dir, model_path, output_dir, device='auto', image_size=960,
                  detector_factory=None, replay_mode='live', recovery_factory=None,
-                 shape_factory=None, reference='front'):
+                 shape_factory=None, reference='front', confidence=.20):
         self.data_dir = Path(data_dir)
         self.model_path = Path(model_path)
         self.output_dir = Path(output_dir)
         self.device = device
         self.image_size = image_size
+        if not 0 < confidence < 1:
+            raise ValueError('Confidence must be between zero and one')
+        self.confidence = confidence
         self.detector_factory = detector_factory
         if replay_mode not in {'live', 'batch'}:
             raise ValueError('Replay mode must be live or batch')
@@ -156,7 +159,8 @@ class Engine:
             if self._detector is None:
                 if self.detector_factory is None:
                     from .detector import VehicleDetector
-                    self._detector = VehicleDetector(self.model_path,self.device,self.image_size)
+                    self._detector = VehicleDetector(self.model_path,self.device,self.image_size,
+                                                     confidence=self.confidence)
                 else:
                     self._detector = self.detector_factory()
             warmup_start = time.perf_counter()
@@ -177,6 +181,7 @@ class Engine:
             trajectory_writer.writeheader()
             config = {'replay_mode': self.replay_mode, 'model': self._detector.name,
                       'weights': self.model_path.name, 'image_size': self.image_size,
+                      'detector_confidence': self.confidence,
                       'source_fps': fps, 'coordinate_units': 'cm',
                       'reference_point': self.reference, 'algorithm': 'causal_image_evidence_and_shared_shape_v2',
                       'world_max_coast_s': .5, 'world_max_bearing_s': 5.,
