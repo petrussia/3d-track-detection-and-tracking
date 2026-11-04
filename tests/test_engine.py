@@ -90,8 +90,10 @@ class EngineTests(unittest.TestCase):
             self.assertEqual(state['status'],'finished',state['message'])
             records=[json.loads(s) for s in (Path(state['summary']['run_dir'])/'observations.jsonl').read_text().splitlines()]
             last=records[-1]['world']
-            self.assertEqual(last['reference_point'],'front_ground_contact')
-            self.assertGreater(last['position_cm'][1]-last['body_center_cm'][1],80.)
+            self.assertIsNone(last['reference_point'])
+            self.assertIsNone(last['position_cm'])
+            self.assertIsNotNone(last['body_center_cm'])
+            self.assertTrue(all(r['world']['position_cm'] is None for r in records))
 
     def test_rejected_shape_does_not_poison_reference_for_later_image_bearings(self):
         with tempfile.TemporaryDirectory() as folder:

@@ -57,6 +57,10 @@ def orient_reference(model, velocity_cm_s, velocity_covariance, dt):
 
 
 def select_reference(shape, reference):
+    if reference not in {'front', 'center'}:
+        raise ValueError('Reference must be front or center')
+    if reference == 'front' and (not shape.get('front_observable') or shape.get('front_cm') is None):
+        return None
     result = dict(shape)
     use_front = reference == 'front' and shape.get('front_observable') and shape.get('front_cm') is not None
     result['position_cm'] = list(shape['front_cm'] if use_front else shape['center_cm'])
@@ -70,6 +74,10 @@ def select_reference(shape, reference):
 
 def reference_from_center(measurement, model, reference):
     if measurement is None:
+        return None
+    if reference not in {'front', 'center'}:
+        raise ValueError('Reference must be front or center')
+    if reference == 'front' and (not model.get('front_observable') or model.get('front_cm') is None):
         return None
     result = dict(measurement)
     offset = center_offset(model, reference)

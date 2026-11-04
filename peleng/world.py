@@ -96,10 +96,12 @@ class WorldTrack:
         dt = timestamp-self.timestamp if self.timestamp is not None else 0.
         if self.initialized:
             self._predict(timestamp-self.timestamp)
+        predicted_position = self.x[:3].tolist() if self.initialized else None
         self.timestamp = timestamp
         accepted = False
         reason = blocked_reason
         reinitialized = False
+        reset_reason = None
         depth_expired = self.mode == 'metric_3d' and timestamp-self.last_metric > self.max_bearing_s
         next_mode = ('assumed_ground' if measurement and measurement['method'] == 'ground_plane'
                      else 'metric_3d')
@@ -108,7 +110,15 @@ class WorldTrack:
                              and measurement.get('reference_point', self.reference_point) != self.reference_point)
         independent_depth = bool(measurement is not None and not bearing and
             measurement.get('metric_depth_observed', measurement['method'] == 'triangulated'))
-        if measurement is not None and not bearing and (not self.initialized or expired or depth_expired or mode_changed or reference_changed):
+        transition_reasons = [name for name, active in (
+            ('track_expired', expired), ('depth_expired', depth_expired),
+            ('mode_changed', mode_changed), ('reference_changed', reference_changed)) if active]
+        # A brief visibility gap may resume via the ordinary innovation/motion
+        # gates, without relocating or resetting the filter. A bearing alone
+        # cannot revive a lost track, nor can incompatible reference/depth modes.
+        needs_confirmation = self.initialized and (
+            depth_expired or mode_changed or reference_changed or (expired and bearing))
+        if measurement is not None and not bearing and not self.initialized:
             self.x = np.r_[point, np.zeros(3)]
             self.p = np.zeros((6, 6))
             self.p[:3, :3] = covariance
@@ -119,6 +129,10 @@ class WorldTrack:
             self.last_metric = timestamp
             self.depth_source = measurement['method']
             self.segment_id += 1
+        elif measurement is not None and needs_confirmation:
+            # Expiration is not evidence that the next range estimate is correct.
+            # Keep the old state separate from the candidate until confirmed.
+            reason = 'reacquisition_pending:' + ','.join(transition_reasons)
         elif measurement is not None and self.initialized and not depth_expired and (not bearing or self.mode == 'metric_3d'):
             h = np.zeros((3, 6))
             h[:, :3] = np.eye(3)
@@ -156,13 +170,19 @@ class WorldTrack:
         # Reliable full-volume poses can recover a depth prior that accepted
         # bearings kept alive. Epipolar ray agreement alone is not enough.
         independent = (measurement is not None and measurement.get('method') == 'cuboid_multiview'
-                       and len(measurement.get('cameras',[])) >= 2
+                       and len(set(measurement.get('cameras',[]))) >= 2
                        and measurement.get('metric_depth_observed',False)
                        and measurement.get('scale_usable',False)
                        and not measurement.get('partial_silhouette',False)
                        and measurement.get('fit_normalized_rms',math.inf) <= 2.5)
+        # Moving from an assumed ground plane to measured depth can also use
+        # repeated triangulations. They cannot reset an existing metric track.
+        ground_to_metric = (measurement is not None and self.mode == 'assumed_ground'
+                            and measurement.get('method') == 'triangulated'
+                            and len(set(measurement.get('cameras', []))) >= 2
+                            and independent_depth)
         reacquisition_reason = None
-        if not accepted and independent:
+        if not accepted and (independent or ground_to_metric):
             candidate = {'time':timestamp,'point':point.copy(),'covariance':covariance,
                          'reference':measurement.get('reference_point',self.reference_point)}
             if self._metric_candidates:
@@ -183,7 +203,9 @@ class WorldTrack:
                 self.segment_id+=1
                 accepted=reinitialized=True
                 reason=None
-                reacquisition_reason='consistent_multiview_pose'
+                reacquisition_reason=('consistent_multiview_pose' if independent
+                                      else 'consistent_triangulation_from_ground')
+                reset_reason = reacquisition_reason
                 self._metric_candidates=[]
         elif accepted and not bearing:
             self._metric_candidates=[]
@@ -219,6 +241,8 @@ class WorldTrack:
                     if self.last_independent_depth is not None else None),
                 'depth_source': self.depth_source, 'uncertainty_m': uncertainty,
                 'mode': self.mode, 'segment_id': self.segment_id, 'mode_reset': bool(reinitialized),
+                'reset_reason': reset_reason, 'transition_reasons': transition_reasons,
+                'predicted_position_cm': predicted_position,
                 'reference_point': self.reference_point,
                 'measurement_accepted': accepted, 'raw_measurement': raw_measurement,
                 'rejection_reason': reason, 'reinitialized': reinitialized,

@@ -27,6 +27,7 @@ class ShapeTests(unittest.TestCase):
             1: ([-10000., -3000., 2200.], -7., 15.),
             2: ([3000., -10000., 1800.], -5., 105.),
             3: ([-10000., -3000., 2200.], -7., 15.),
+            4: ([3000., -10000., 1800.], -5., 105.),
         }
         for camera_id, (origin, pitch, yaw) in self.poses.items():
             text = ('Frame;Loc_X;Loc_Y;Loc_Z;Rot_Roll;Rot_Pitch;Rot_Yaw;;;Focal length;15\n'
@@ -85,6 +86,39 @@ class ShapeTests(unittest.TestCase):
         self.assertLess(result['fit_rms_px'], .1)
         self.assertGreater(np.linalg.eigvalsh(result['covariance_cm2']).min(), 0)
 
+    def test_rejected_proposal_does_not_change_shape_history_or_rewind_time(self):
+        estimator = ShapeEstimator(self.rig)
+        self.learn(estimator)
+        checkpoint = estimator.geometry_checkpoint()
+        old_dimensions = estimator._dimensions.copy()
+        old_samples = estimator._sample_count
+        estimator.update(6, .6, self.boxes([1400., 800., 400.]), velocity_cm_s=self.direction*400)
+        self.assertGreater(estimator._sample_count, old_samples)
+        estimator.restore_geometry(checkpoint)
+        self.assertEqual(estimator._sample_count, old_samples)
+        np.testing.assert_array_equal(estimator._dimensions, old_dimensions)
+        self.assertEqual(estimator._frame, 6)
+        self.assertEqual(estimator._timestamp, .6)
+        with self.assertRaises(ValueError):
+            estimator.update(6, .6, [])
+
+    def test_known_geometry_preserves_size_and_nonzero_shared_uncertainty(self):
+        estimator = ShapeEstimator(self.rig, dimensions_m=self.dimensions/100.)
+        first = estimator.update(0, 0., self.boxes([1000.,500.,400.]),
+                                 velocity_cm_s=self.direction*400)
+        self.assertIsNotNone(first)
+        self.assertEqual(first['dimension_source'], 'configured_asset_geometry')
+        self.assertEqual(first['shape_samples'], 0)
+        np.testing.assert_allclose(first['center_cm'], [1000.,500.,400.], atol=5.)
+        for frame in range(1, 5):
+            result = estimator.update(frame, frame/10,
+                self.boxes([1000.+frame*30.,500.,400.], cameras=(1,)),
+                prior_cm=[1000.+frame*30.,500.,400.], velocity_cm_s=self.direction*400)
+            self.assertIsNotNone(result)
+            np.testing.assert_allclose(result['dimensions_cm'], self.dimensions)
+            np.testing.assert_allclose(result['dimension_sigma_cm'], .1*self.dimensions)
+            self.assertFalse(result['metric_depth_observed'])
+
     def test_forward_sign_follows_causal_motion_not_a_fixed_world_axis(self):
         # Choosing +X or a fixed yaw branch silently flips the front on reversing motion.
         forward = self.learn(ShapeEstimator(self.rig))
@@ -129,6 +163,19 @@ class ShapeTests(unittest.TestCase):
         self.assertTrue(result['front_observable'])
         offset = np.array(result['front_cm'])-result['center_cm']
         self.assertGreater(np.dot(offset, self.direction)/np.linalg.norm(offset), .8)
+
+    def test_consensus_prefers_three_supporting_views_over_confident_outlier(self):
+        estimator = ShapeEstimator(self.rig)
+        center = np.array([1000., 500., 400.])
+        observations = self.boxes(center, cameras=(1, 2, 3, 4))
+        observations[2]['bbox'] = (np.array(observations[2]['bbox'])+[-200., 0., -200., 0.]).tolist()
+        observations[2]['confidence'] = 1.
+        result = estimator.update(0, 0., observations, velocity_cm_s=self.direction*400)
+        self.assertIsNotNone(result)
+        self.assertEqual(result['view_consensus']['supporting_cameras'], [1, 2, 4])
+        self.assertEqual(result['view_consensus']['rejected_cameras'], [3])
+        self.assertEqual(result['cameras'], [1, 2, 4])
+        np.testing.assert_allclose(result['center_cm'], center, atol=15.)
 
     def test_established_image_dimensions_supply_single_view_range(self):
         # A bearing-only implementation keeps the deliberately wrong prior range.

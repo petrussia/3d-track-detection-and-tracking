@@ -1,0 +1,13 @@
+{
+  "status": "candidate_not_yet_end_to_end_validated",
+  "asset_sha256": "b8d08d3e62de67860698e5c84fd2344a5f0a9045e98509eff55043b6ec5a8391",
+  "asset_length_width_height_m": [6.6848641584, 1.6777344496, 2.4238118417],
+  "scale_estimate": 3.3141374781,
+  "dimensions_m": [22.1545588435, 5.5602426177, 8.0328456645],
+  "relative_dimension_sigma": 0.10,
+  "calibration": "median scale of training-only full-asset box fits with normalized RMS <= 2.5",
+  "calibration_frames": [75, 300, 600, 1200, 1275, 1350, 1725],
+  "validation_or_test_labels_used": false,
+  "ground_truth_trajectory_used": false,
+  "limitations": "Approximate upright cuboid used in inference; 10% sigma is a conservative model assumption, not a calibrated confidence interval; actor scale in other scenes needs verification."
+}

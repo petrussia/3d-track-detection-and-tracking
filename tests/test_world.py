@@ -15,6 +15,18 @@ def fix(x, y=0, z=100, sigma=50):
 
 
 class WorldTests(unittest.TestCase):
+    def test_compatible_metric_after_short_gap_uses_gates_without_reset(self):
+        track = self.make()
+        track.update(fix(1000), 0.)
+        track.update(None, .5)
+        single = fix(1020)
+        single.update(method='cuboid_singleview', metric_depth_observed=False)
+        result = track.update(single, .6)
+        self.assertTrue(result['measurement_accepted'])
+        self.assertFalse(result['mode_reset'])
+        self.assertEqual(result['segment_id'], 0)
+        self.assertIn('track_expired', result['transition_reasons'])
+
     def test_translated_bearing_retains_growing_common_reference_uncertainty(self):
         track=self.make()
         track.update(fix(1000),0)
@@ -76,15 +88,19 @@ class WorldTests(unittest.TestCase):
             self.assertFalse(result['measurement_accepted'])
             track.update(bearing,timestamp+.03)
 
-    def test_reference_change_resets_velocity_instead_of_treating_it_as_motion(self):
+    def test_reference_change_requires_confirmation_instead_of_instant_reset(self):
         track = self.make()
         center = fix(0)
         center['reference_point'] = 'bbox_visual_center'
         a = track.update(center, 0)
         front = fix(1000)
         front.update(method='cuboid_multiview', reference_point='front_face_center',
-                     metric_depth_observed=True)
+                     metric_depth_observed=True, scale_usable=True, fit_normalized_rms=.5)
         b = track.update(front, .1)
+        self.assertFalse(b['measurement_accepted'])
+        self.assertIn('reference_changed', b['transition_reasons'])
+        track.update(front, .2)
+        b = track.update(front, .3)
         self.assertTrue(b['measurement_accepted'])
         self.assertEqual(b['velocity_cm_s'], [0.,0.,0.])
         self.assertGreater(b['segment_id'], a['segment_id'])
@@ -117,13 +133,20 @@ class WorldTests(unittest.TestCase):
         self.assertEqual(t.update(None, 1.6)['state'], 'lost')
         self.assertIsNone(t.update(None, 1.7)['position_cm'])
 
-    def test_prediction_uncertainty_grows_and_long_loss_reinitializes(self):
+    def test_prediction_uncertainty_grows_and_long_loss_requires_confirmed_pose(self):
         t = self.make()
         first = t.update(fix(100), 0)
         coast = t.update(None, .3)
         self.assertGreater(coast['uncertainty_m'], first['uncertainty_m'])
         t.update(None, 2)
         reacquired = t.update(fix(9000), 2.1)
+        self.assertEqual(reacquired['state'], 'lost')
+        pose = fix(9000)
+        pose.update(method='cuboid_multiview', metric_depth_observed=True,
+                    scale_usable=True, fit_normalized_rms=.5)
+        t.update(pose, 2.2)
+        t.update(pose, 2.3)
+        reacquired = t.update(pose, 2.4)
         self.assertEqual(reacquired['state'], 'observed')
         self.assertAlmostEqual(reacquired['position_cm'][0], 9000)
         self.assertTrue(reacquired['reinitialized'])
@@ -207,12 +230,39 @@ class WorldTests(unittest.TestCase):
         ground['position_cm'][0] = 1100
         t.update(ground, .1)
         result = t.update(fix(4000, z=300), .2)
+        self.assertFalse(result['measurement_accepted'])
+        t.update(fix(4000, z=300), .3)
+        result = t.update(fix(4000, z=300), .4)
         self.assertEqual(result['mode'], 'metric_3d')
         self.assertEqual(result['velocity_cm_s'], [0., 0., 0.])
         self.assertEqual(result['position_cm'], [4000., 0., 300.])
         self.assertGreater(result['segment_id'], first['segment_id'])
         self.assertTrue(active(.3))
         self.assertFalse(active(6))
+
+    def test_expired_singleview_cannot_relocate_even_when_repeated(self):
+        t = self.make()
+        t.update(fix(1000), 0)
+        single = fix(9000)
+        single.update(method='cuboid_singleview', metric_depth_observed=False)
+        for timestamp in (.533, .6, .7, .8):
+            r = t.update(single, timestamp)
+            self.assertFalse(r['measurement_accepted'])
+            self.assertFalse(r['mode_reset'])
+            self.assertIsNone(r['position_cm'])
+            self.assertIn('track_expired', r['transition_reasons'])
+            self.assertAlmostEqual(r['predicted_position_cm'][0], 1000)
+
+    def test_incoherent_multiview_candidates_do_not_confirm(self):
+        t = self.make()
+        t.update(fix(0), 0)
+        for timestamp, x in ((1., 10000), (1.1, -10000), (1.2, 10000)):
+            pose = fix(x)
+            pose.update(method='cuboid_multiview', metric_depth_observed=True,
+                        scale_usable=True, fit_normalized_rms=.5)
+            r = t.update(pose, timestamp)
+            self.assertFalse(r['measurement_accepted'])
+            self.assertFalse(r['mode_reset'])
 
     def test_broad_uncertainty_does_not_allow_instant_hundred_metre_correction(self):
         t = self.make()

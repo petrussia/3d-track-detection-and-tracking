@@ -1,7 +1,8 @@
 """Causal metric cuboid fitting from calibrated, complete image silhouettes.
 
-The box is a generic elongated vehicle volume, not a supplied mesh. Its scale is
-learned only from simultaneous views, and its front sign only from past/current
+The box is an elongated vehicle volume, not a supplied mesh. Its scale is
+learned from simultaneous views or explicitly configured from verified geometry;
+its front sign comes from past/current
 motion (forward travel is an explicit assumption). A known-size single view can
 measure range; it cannot independently re-measure the learned physical size.
 No reference trajectory, image from a later frame, or fixed pivot offset is used.
@@ -11,6 +12,7 @@ floor, reject collapsed volumes/poor geometry, and never train on clipped boxes.
 Front-face center is a geometric convention, not a guarantee about a mesh pivot.
 """
 from collections import deque
+import copy
 from itertools import combinations, product
 import math
 
@@ -51,8 +53,14 @@ class ShapeEstimator:
     independent-noise decomposition or a calibrated confidence interval.
     """
 
-    def __init__(self, rig):
+    def __init__(self, rig, dimensions_m=None, dimension_relative_sigma=.10):
         self.rig = rig
+        self._known_dimensions = _vector(dimensions_m, 'Known dimensions')
+        if self._known_dimensions is not None and not self._plausible(self._known_dimensions):
+            raise ValueError('Known dimensions must be plausible length, width, height in metres')
+        if not math.isfinite(dimension_relative_sigma) or not 0 < dimension_relative_sigma <= 1:
+            raise ValueError('Dimension relative sigma must be in (0, 1]')
+        self._known_dimension_sigma = float(dimension_relative_sigma)
         self.reset()
 
     def reset(self):
@@ -60,13 +68,24 @@ class ShapeEstimator:
         self._timestamp = None
         self._samples = deque(maxlen=40)
         self._sample_count = 0
-        self._dimensions = None
-        self._dimension_variance = None
+        self._dimensions = None if self._known_dimensions is None else self._known_dimensions.copy()
+        self._dimension_variance = (None if self._dimensions is None else
+                                   (self._known_dimension_sigma*self._dimensions)**2)
         self._centers = deque(maxlen=90)
         self._yaw = None
         self._heading = None
         self._last_full_yaw = None
         self._last_full_timestamp = None
+
+    def geometry_checkpoint(self):
+        """Save geometric history before proposing a measurement to the filters."""
+        return copy.deepcopy({key: value for key, value in self.__dict__.items()
+                              if key not in {'rig', '_frame', '_timestamp'}})
+
+    def restore_geometry(self, checkpoint):
+        # Frame/time consumption is irreversible; rejected geometry must not
+        # teach dimensions or heading to the next frame.
+        self.__dict__.update(checkpoint)
 
     def _views(self, frame, observations):
         selected = {}
@@ -371,6 +390,69 @@ class ShapeEstimator:
                     fixed=fixed, motion_constrained=motion_constrained, orientation_held=orientation_held,
                     active_camera_ids=active_camera_ids, metric_camera_ids=metric_camera_ids)
 
+    def _support(self, fit, views):
+        """Check each complete silhouette, including views not used for fitting."""
+        support, residuals = [], {}
+        for view in views:
+            projected = self._project(fit['center'], fit['yaw'], fit['dimensions'], [view])
+            normalized = ((projected-view['edges'])/view['sigma']
+                          if projected is not None else np.full(4, np.inf))
+            rms = float(np.sqrt(np.mean(normalized**2)))
+            residuals[view['camera_id']] = rms if math.isfinite(rms) else None
+            if rms <= 2.5 and np.max(np.abs(normalized)) <= 4.:
+                support.append(view)
+        return support, residuals
+
+    def _robust_fit(self, candidates, heading, fixed):
+        def fit_views(views, seed=None):
+            start = self._seed(views) if seed is None else seed
+            return (None if start is None else
+                    self._fit(views, start, heading, shared=self._dimensions, fixed=fixed))
+
+        fit = fit_views(candidates)
+        if len(candidates) < 3:
+            return fit, candidates
+        hypotheses = [fit] if fit is not None else []
+        if fit is not None and len(self._support(fit, candidates)[0]) == len(candidates):
+            fit['consensus'] = dict(evaluated_cameras=[v['camera_id'] for v in candidates],
+                supporting_cameras=[v['camera_id'] for v in candidates], rejected_cameras=[],
+                normalized_rms_by_camera=self._support(fit, candidates)[1])
+            return fit, candidates
+        else:
+            pairs = combinations(candidates, 2)
+        for pair in pairs:
+            candidate = fit_views(pair)
+            if candidate is not None:
+                hypotheses.append(candidate)
+        alternatives = []
+        for candidate in hypotheses:
+            support, _ = self._support(candidate, candidates)
+            if len(support) < 2 or self._seed(support) is None:
+                continue
+            # Refine on the consensus, then recheck every available view.
+            refined = fit_views(support, candidate['center'])
+            if refined is None:
+                continue
+            final_support, residuals = self._support(refined, candidates)
+            supported_ids = {v['camera_id'] for v in final_support}
+            if not {v['camera_id'] for v in support}.issubset(supported_ids):
+                continue
+            refined['consensus'] = dict(
+                evaluated_cameras=[v['camera_id'] for v in candidates],
+                supporting_cameras=sorted(supported_ids),
+                rejected_cameras=[v['camera_id'] for v in candidates if v['camera_id'] not in supported_ids],
+                normalized_rms_by_camera=residuals)
+            # Rank support before fit error; never reward an exact fit to just
+            # its generating pair over a consensus of several independent views.
+            score = (-len(final_support), -sum(v['confidence'] for v in final_support),
+                     sum(min(16., r*r) if r is not None else 16. for r in residuals.values()),
+                     float(np.trace(refined['covariance'][:3, :3])))
+            alternatives.append((score, refined, support))
+        if not alternatives:
+            return None, candidates
+        _, fit, support = min(alternatives, key=lambda item: item[0])
+        return fit, support
+
     def _learn(self, fit):
         dimensions = fit['dimensions']
         variance = np.maximum(np.diag(fit['covariance'])[4:], (.025*dimensions)**2)
@@ -425,25 +507,7 @@ class ShapeEstimator:
         heading = external_heading if external_heading is not None else self._heading
 
         def robust_fit(candidates, fixed):
-            start = self._seed(candidates)
-            if start is None:
-                return None, candidates
-            fit = self._fit(candidates, start, heading, shared=self._dimensions, fixed=fixed)
-            if fit is not None or len(candidates) < 3:
-                return fit, candidates
-            alternatives = []
-            for pair in combinations(candidates, 2):
-                start = self._seed(pair)
-                if start is None:
-                    continue
-                candidate = self._fit(pair, start, heading, shared=self._dimensions, fixed=fixed)
-                if candidate is not None:
-                    score = candidate['normalized_rms'] + .1*(2-sum(v['confidence'] for v in pair))
-                    alternatives.append((score, candidate, list(pair)))
-            if not alternatives:
-                return None, candidates
-            _, candidate, pair = min(alternatives, key=lambda item: item[0])
-            return candidate, pair
+            return self._robust_fit(candidates, heading, fixed)
 
         def range_consistent(candidate, view):
             if prior is None:
@@ -477,8 +541,8 @@ class ShapeEstimator:
             return candidate, selected
 
         if len(full_views) >= 2:
-            fit, views = robust_fit(full_views, fixed=False)
-            if fit is None and self._dimensions is not None:
+            fit, views = robust_fit(full_views, fixed=self._known_dimensions is not None)
+            if fit is None and self._dimensions is not None and self._known_dimensions is None:
                 fit, views = robust_fit(full_views, fixed=True)
             if fit is None:
                 fit, views = single_view_fallback(full_views)
@@ -489,7 +553,17 @@ class ShapeEstimator:
                                  None if self._dimension_variance is None else self._dimension_variance.copy())
             if not fit['fixed']:
                 self._learn(fit)
+                consensus = fit.get('consensus')
                 fit = self._fit(views, fit['center'], heading, shared=self._dimensions, fixed=True)
+                if fit is not None and consensus is not None:
+                    support, residuals = self._support(fit, full_views)
+                    if not {v['camera_id'] for v in views}.issubset({v['camera_id'] for v in support}):
+                        fit = None
+                    else:
+                        fit['consensus'] = dict(consensus, normalized_rms_by_camera=residuals,
+                            supporting_cameras=[v['camera_id'] for v in support],
+                            rejected_cameras=[v['camera_id'] for v in full_views
+                                              if v['camera_id'] not in {s['camera_id'] for s in support}])
             if fit is None:
                 self._samples, self._sample_count, self._dimensions, self._dimension_variance = previous_learning
                 fit, views = single_view_fallback(full_views)
@@ -574,19 +648,24 @@ class ShapeEstimator:
             'method': 'cuboid_multiview' if multi_view else 'cuboid_singleview',
             'cameras': [view['camera_id'] for view in views],
             'metric_cameras': [view['camera_id'] for view in metric_views] if multi_view else [],
-            'metric_depth_observed': multi_view, 'metric_scale_source': 'current_multiview' if multi_view else 'past_multiview_dimensions',
+            'metric_depth_observed': multi_view,
+            'metric_scale_source': ('current_multiview' if multi_view else
+                'configured_asset_geometry' if self._known_dimensions is not None else 'past_multiview_dimensions'),
             'quality': 'shape_multiview' if multi_view else 'shape_constrained_single_view',
             'reference_point': 'cuboid_volume_center', 'front_reference_point': 'cuboid_forward_face_center',
             'front_observable': front_observable, 'range_from_shape': not multi_view,
             'yaw_rad': yaw, 'yaw_sigma_rad': fit['yaw_sigma'],
-            'dimensions_cm': (dimensions*100).tolist(), 'dimensions_learned': self._sample_count >= 3,
+            'dimensions_cm': (dimensions*100).tolist(),
+            'dimensions_learned': self._known_dimensions is not None or self._sample_count >= 3,
+            'dimension_source': 'configured_asset_geometry' if self._known_dimensions is not None else 'causal_multiview_learning',
             'dimension_sigma_cm': (np.sqrt(self._dimension_variance)*100).tolist(),
-            'provisional_scale': self._sample_count < 3, 'scale_usable': True,
+            'provisional_scale': self._known_dimensions is None and self._sample_count < 3, 'scale_usable': True,
             'partial_silhouette': partial,
             'shape_samples': self._sample_count, 'fit_rms_px': fit['rms'], 'fit_max_px': fit['maximum'],
             'fit_normalized_rms': fit['normalized_rms'],
+            'view_consensus': fit.get('consensus'),
             'orientation_constrained_by_motion': fit['motion_constrained'],
             'orientation_held': fit['orientation_held'],
             'uncertainty_m': math.sqrt(float(np.linalg.eigvalsh(center_covariance).max())),
-            'assumption': 'Upright rigid vehicle cuboid; forward end follows causal motion; learned scale is reused in single views',
+            'assumption': 'Upright rigid vehicle cuboid; forward end follows causal motion; configured or learned dimensions are reused in single views',
         }

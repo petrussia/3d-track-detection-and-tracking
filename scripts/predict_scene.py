@@ -22,11 +22,14 @@ def main():
     parser.add_argument('--outputs', type=Path, required=True)
     parser.add_argument('--backup', type=Path, required=True)
     parser.add_argument('--confidence', type=float, default=.20)
+    parser.add_argument('--reference', choices=['center', 'front'], default='center')
+    parser.add_argument('--shape-dimensions-m', nargs=3, type=float, metavar=('L', 'W', 'H'))
     args = parser.parse_args()
     info = inspect_dataset(args.data)
     print(json.dumps(info), flush=True)
     engine = Engine(args.data, args.weights, args.outputs, device='cuda:0', image_size=960,
-                    replay_mode='batch', reference='center', confidence=args.confidence)
+                    replay_mode='batch', reference=args.reference, confidence=args.confidence,
+                    shape_dimensions_m=args.shape_dimensions_m)
     engine.start()
     try:
         while True:
@@ -47,8 +50,8 @@ def main():
     diagnostics = write_prediction_report(run, info['frames_per_camera'])
     environment = {'weights': str(args.weights), 'weights_sha256': hashlib.sha256(args.weights.read_bytes()).hexdigest(),
                    'git_commit': subprocess.check_output(['git', 'rev-parse', 'HEAD'], text=True).strip(),
-                   'dataset': str(args.data), 'reference': 'center', 'imgsz': 960,
-                   'confidence': args.confidence}
+                   'dataset': str(args.data), 'reference': args.reference, 'imgsz': 960,
+                   'confidence': args.confidence, 'shape_dimensions_m': args.shape_dimensions_m}
     (run / 'environment.json').write_text(json.dumps(environment, indent=2), encoding='utf-8')
     shutil.copytree(run, args.backup / run.name, dirs_exist_ok=True)
     print(json.dumps(diagnostics), flush=True)

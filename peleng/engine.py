@@ -21,7 +21,6 @@ from .stream import SequentialVideo, due_frame
 from .tracking import CameraTrack
 from .world import WorldTrack
 from .reference import select_reference, reference_from_center, orient_reference
-from .initialization import LeadingContact
 from .silhouette import center_observations
 from .inputs import camera_video
 
@@ -67,7 +66,7 @@ def annotate(frame, track, camera_id, source_time, projected_point=None):
 class Engine:
     def __init__(self, data_dir, model_path, output_dir, device='auto', image_size=960,
                  detector_factory=None, replay_mode='live', recovery_factory=None,
-                 shape_factory=None, reference='front', confidence=.20):
+                 shape_factory=None, reference='front', confidence=.20, shape_dimensions_m=None):
         self.data_dir = Path(data_dir)
         self.model_path = Path(model_path)
         self.output_dir = Path(output_dir)
@@ -84,6 +83,7 @@ class Engine:
             raise ValueError('Target reference must be front or center')
         self.recovery_factory = recovery_factory
         self.shape_factory = shape_factory
+        self.shape_dimensions_m = shape_dimensions_m
         self.reference = reference
         self._lock = threading.Lock()
         self._stop = threading.Event()
@@ -182,11 +182,12 @@ class Engine:
             config = {'replay_mode': self.replay_mode, 'model': self._detector.name,
                       'weights': self.model_path.name, 'image_size': self.image_size,
                       'detector_confidence': self.confidence,
+                      'shape_dimensions_m': self.shape_dimensions_m,
                       'source_fps': fps, 'coordinate_units': 'cm',
-                      'reference_point': self.reference, 'algorithm': 'causal_image_evidence_and_shared_shape_v2',
+                      'reference_point': self.reference, 'algorithm': 'causal_consensus_shape_confirmed_reacquisition_v3',
                       'world_max_coast_s': .5, 'world_max_bearing_s': 5.,
                       'world_max_speed_cm_s': 5000., 'world_max_correction_floor_cm': 1000.,
-                      'fallback_policy': 'current_ground_assumed_then_triangulated_metric_segments',
+                      'fallback_policy': 'internal_ground_only_until_named_reference_available',
                       'ground_truth_used_for_inference': False}
             (run_dir/'config.json').write_text(json.dumps(config, indent=2), encoding='utf-8')
             tracks = {i: CameraTrack() for i in camera_ids}
@@ -197,12 +198,11 @@ class Engine:
                 recovery = self.recovery_factory(rig)
             if self.shape_factory is None:
                 from .shape import ShapeEstimator
-                shape_estimator = ShapeEstimator(rig)
+                shape_estimator = ShapeEstimator(rig, dimensions_m=self.shape_dimensions_m)
             else:
                 shape_estimator = self.shape_factory(rig)
             world_track = WorldTrack()
             body_track = WorldTrack()
-            initial_contact = LeadingContact(rig)
             previous_body = None
             previous_timestamp = None
             last_shape = None
@@ -255,14 +255,18 @@ class Engine:
                 raw_center_fix = estimate_measurement(rig, frame_index, center_views,
                                            prior_cm=center_prior,
                                            allow_ground=not body_track.depth_prior_active(timestamp))
-                legacy_fix = raw_center_fix
-                if last_shape is None and self.reference == 'front':
-                    legacy_fix = initial_contact.update(frame_index,timestamp,observations,legacy_fix)
+                # A ground contact is neither the volume center nor the front
+                # face center. Keep it internal until a body height is known.
+                legacy_fix = (dict(raw_center_fix, reference_point='cuboid_center')
+                              if self.reference == 'center' and raw_center_fix
+                              and raw_center_fix['method'] != 'ground_plane' else None)
                 velocity_hint=None
                 if previous_body and previous_body['velocity_cm_s'] is not None and not previous_body['mode_reset']:
                     sigma=math.sqrt(max(0.,float(np.linalg.eigvalsh(body_track.p[3:5,3:5]).max())))
                     if np.linalg.norm(previous_body['velocity_cm_s'][:2]) >= max(100.,3*sigma):
                         velocity_hint=previous_body['velocity_cm_s']
+                shape_checkpoint = (shape_estimator.geometry_checkpoint()
+                                    if hasattr(shape_estimator, 'geometry_checkpoint') else None)
                 shape = shape_estimator.update(frame_index, timestamp, observations,
                     prior_cm=center_prior,
                     velocity_cm_s=velocity_hint)
@@ -281,8 +285,12 @@ class Engine:
                     fix = (reference_from_center(raw_center_fix,reference_model,self.reference)
                            if reference_model is not None else legacy_fix)
                 world = world_track.update(fix, timestamp)
-                if shape and world['measurement_accepted']:
-                    last_shape = dict(fix)
+                if shape_checkpoint is not None and (not body['measurement_accepted']
+                        or (fix is not None and not world['measurement_accepted'])):
+                    shape_estimator.restore_geometry(shape_checkpoint)
+                if shape and body['measurement_accepted'] and (fix is None or world['measurement_accepted']):
+                    # Center learning must work before the front sign is known.
+                    last_shape = dict(fix if fix is not None else shape)
                 elif fix and world['measurement_accepted'] and reference_model:
                     last_shape=dict(reference_model)
                     last_shape.update(position_cm=fix['position_cm'],center_cm=fix['center_cm'],
@@ -390,8 +398,8 @@ class Engine:
                        'image_size':self.image_size,'run_dir':str(run_dir),
                        'ground_truth_used_for_inference':False,
                        'coordinate_units_assumed':'cm',
-                       'coordinate_reference':self.reference+' of image-derived cuboid; center/front are exported separately; initial ground proxy labeled',
-                       'position_limitations':'Rigid cuboid approximates truck shape; dimensions learned only from images. Single-view scale uses past multi-view dimensions. Unknown exact mesh pivot and terrain; uncertainty not independently calibrated.'}
+                       'coordinate_reference':self.reference+' of image-derived cuboid; center/front are exported separately; unavailable reference is not replaced',
+                       'position_limitations':'Upright rigid cuboid approximates truck shape; dimensions learned from images or explicitly configured. Forward sign follows motion. Unknown exact actor pivot and terrain; uncertainty not independently calibrated.'}
             (run_dir/'summary.json').write_text(json.dumps(summary,indent=2,ensure_ascii=False),encoding='utf-8')
             if latest_montage is not None:
                 cv2.imwrite(str(run_dir/'preview.jpg'),latest_montage)

@@ -83,5 +83,7 @@ class ReferenceTests(unittest.TestCase):
         model=self.model()
         model.update(front_observable=False,front_cm=None)
         result=select_reference(model,'front')
-        self.assertEqual(result['position_cm'],model['center_cm'])
-        self.assertEqual(result['reference_point'],'cuboid_center')
+        self.assertIsNone(result)
+        base = {'position_cm':[1000.,0.,300.], 'method':'triangulated'}
+        self.assertIsNone(reference_from_center(base, model, 'front'))
+        self.assertEqual(select_reference(model, 'center')['reference_point'], 'cuboid_center')
