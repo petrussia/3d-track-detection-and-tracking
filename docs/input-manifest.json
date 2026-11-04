@@ -1,0 +1,61 @@
+{
+  "source": "https://drive.google.com/file/d/1irHO-n6uVGMUH44iSfDciFtsyaIRwE6W/view",
+  "files": [
+    {
+      "name": "Way1.FinalImage.CineCameraActor1.mp4",
+      "bytes": 9054196,
+      "sha256": "22c3547135027c6e531dd25f7778f43585db32861687da31558849ab1daf7b8c"
+    },
+    {
+      "name": "Way1.FinalImage.CineCameraActor2.mp4",
+      "bytes": 14027586,
+      "sha256": "0aa464e21ed58229026d18ae64be89b57102365aa22f7ca609d4f800175f08c8"
+    },
+    {
+      "name": "Way1.FinalImage.CineCameraActor3.mp4",
+      "bytes": 18045013,
+      "sha256": "326f99f1081508513dce8358e2e8ce3474c4766d4d5705b6fef8e121f727552b"
+    },
+    {
+      "name": "Way1.FinalImage.CineCameraActor4.mp4",
+      "bytes": 20441942,
+      "sha256": "e885c547f7eaa12491230525dff31e21a8074b53c3dc81ada39080446742c74a"
+    },
+    {
+      "name": "Way1.FinalImage.CineCameraActor5.mp4",
+      "bytes": 46358492,
+      "sha256": "b79302bea1e37c969db9f0be722e66a239b9181eadb367ceb02ea69be51ed729"
+    },
+    {
+      "name": "object_transform_CineCameraActor1.csv",
+      "bytes": 52087,
+      "sha256": "17becf3be3148fefc65acc96adf234039a7ac130ceedf3fc0a183de1685cff66"
+    },
+    {
+      "name": "object_transform_CineCameraActor2.csv",
+      "bytes": 54091,
+      "sha256": "4c44e5d92019439e42b0a64e6f7baf5c71daaed53545ad5995a31e595375bf3d"
+    },
+    {
+      "name": "object_transform_CineCameraActor3.csv",
+      "bytes": 57097,
+      "sha256": "7580a5a2c351c02b0eecc232dc20420f3b4d0d983f328bbc26ba20771dbecffb"
+    },
+    {
+      "name": "object_transform_CineCameraActor4.csv",
+      "bytes": 58099,
+      "sha256": "71157d386d1015ada979b27fbc005f17984846552f5dea59b39aeb80dde11749"
+    },
+    {
+      "name": "object_transform_CineCameraActor5.csv",
+      "bytes": 60865,
+      "sha256": "5f0ead2f5c98375a37704bd19b5a8e3789536652c5396d02afe46c1583023462"
+    },
+    {
+      "name": "object_transform_SM_AA_track.csv",
+      "bytes": 33662,
+      "sha256": "20cae9e7227652c3a4b31a723018255487df260db2123f5c34013683d70746ca"
+    }
+  ],
+  "model_assets_in_archive": false
+}

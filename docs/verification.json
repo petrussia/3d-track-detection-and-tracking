@@ -1,0 +1,136 @@
+{
+  "date": "2026-11-03",
+  "stage": "stable checkpoint requested by user",
+  "batch": {
+    "status": "finished",
+    "replay_mode": "batch",
+    "source_fps": 30.0,
+    "source_frames_per_camera": 1001,
+    "source_duration_s": 33.36666666666667,
+    "wall_duration_s": 97.48662833300023,
+    "warmup_s": 1.2357391249997818,
+    "processed_steps": 1001,
+    "available_frames_per_camera": 1001,
+    "skipped_frames_per_camera": 0,
+    "output_hz": 10.268074884903484,
+    "latency_p50_ms": null,
+    "latency_p95_ms": null,
+    "processing_p50_ms": 91.97295800004213,
+    "steps_with_detection": 670,
+    "steps_with_image_measurement": 1001,
+    "world_states": {
+      "observed": 917,
+      "coasting": 84,
+      "lost": 0
+    },
+    "metric_triangulation_steps": 329,
+    "fresh_metric_depth_steps": 329,
+    "shape_range_steps": 458,
+    "rejected_world_updates": 74,
+    "detections_by_camera": {
+      "1": 157,
+      "2": 44,
+      "3": 91,
+      "4": 172,
+      "5": 418
+    },
+    "device": "mps",
+    "model": "yolo11s",
+    "image_size": 960,
+    "run_dir": "outputs/20261103T114811.249915Z",
+    "ground_truth_used_for_inference": false,
+    "coordinate_units_assumed": "cm",
+    "coordinate_reference": "front of image-derived cuboid; center/front are exported separately; initial ground proxy labeled",
+    "position_limitations": "Rigid cuboid approximates truck shape; dimensions learned only from images. Single-view scale uses past multi-view dimensions. Unknown exact mesh pivot and terrain; uncertainty not independently calibrated."
+  },
+  "observed_accuracy": {
+    "count": 915,
+    "axes": {
+      "x": {
+        "mae_m": 4.063206914741832,
+        "rmse_m": 6.050394253599642
+      },
+      "y": {
+        "mae_m": 2.096398589146121,
+        "rmse_m": 2.9695697641934364
+      },
+      "z": {
+        "mae_m": 1.1025995508139061,
+        "rmse_m": 1.5397068866837444
+      }
+    },
+    "horizontal": {
+      "mean_m": 4.849096023543005,
+      "rmse_m": 6.739852758659007,
+      "median_m": 2.5259538508545774,
+      "p90_m": 11.573066336437613,
+      "p95_m": 15.48839925751325,
+      "p99_m": 18.814598163578825,
+      "max_m": 19.10615082046198
+    },
+    "three_d": {
+      "mean_m": 5.180335622549849,
+      "rmse_m": 6.913487723667757,
+      "median_m": 3.1841681283510512,
+      "p90_m": 11.607829565326174,
+      "p95_m": 15.624281910404926,
+      "p99_m": 19.531626358625623,
+      "max_m": 19.86432245429693
+    }
+  },
+  "all_estimate_accuracy": {
+    "count": 999,
+    "axes": {
+      "x": {
+        "mae_m": 4.536201726630427,
+        "rmse_m": 6.649682743910243
+      },
+      "y": {
+        "mae_m": 2.3593244105054607,
+        "rmse_m": 3.4321472053485533
+      },
+      "z": {
+        "mae_m": 1.1324245530710608,
+        "rmse_m": 1.6102773314446857
+      }
+    },
+    "horizontal": {
+      "mean_m": 5.443622004074235,
+      "rmse_m": 7.483175464589851,
+      "median_m": 3.068487281277687,
+      "p90_m": 12.55292904829589,
+      "p95_m": 17.0486302823443,
+      "p99_m": 19.09052639373784,
+      "max_m": 21.926413686883006
+    },
+    "three_d": {
+      "mean_m": 5.758544777785895,
+      "rmse_m": 7.654469812991894,
+      "median_m": 3.313502190618267,
+      "p90_m": 12.568528712480807,
+      "p95_m": 17.345641199455972,
+      "p99_m": 19.839410179990328,
+      "max_m": 22.246744391806992
+    }
+  },
+  "coverage": {
+    "observed_of_processed": 0.916083916083916,
+    "predicted_of_processed": 0.08391608391608392,
+    "estimate_of_processed": 1.0,
+    "lost_of_processed": 0.0,
+    "processed_of_truth": 0.999,
+    "observed_of_truth": 0.915,
+    "predicted_of_truth": 0.084,
+    "estimate_of_truth": 0.999
+  },
+  "paired_observed": {
+    "count": 600,
+    "current_3d_mae_m": 4.826026272453491,
+    "baseline_3d_mae_m": 12.613400784556697
+  },
+  "tests_passed": 125,
+  "independent_review": "GPT-6 Astra Max: three important findings fixed, 46 focused tests passed; no blocking findings",
+  "windows_runtime_tested": false,
+  "current_live_run_tested": false,
+  "held_out_acceptance_confirmed": false
+}

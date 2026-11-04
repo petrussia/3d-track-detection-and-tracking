@@ -1,0 +1,564 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <title>Пеленг — трекинг с пяти камер</title>
+  <style>
+    :root {
+      --bg: #0b1117;
+      --surface: #111a23;
+      --surface-raised: #17232e;
+      --line: #273540;
+      --text: #edf3f7;
+      --muted: #9aabb9;
+      --accent: #7ae8bc;
+      --warning: #efc574;
+      --danger: #ff9191;
+      --mono: ui-monospace, SFMono-Regular, Consolas, monospace;
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; background: var(--bg); color: var(--text); font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; -webkit-font-smoothing: antialiased; }
+    button { font: inherit; }
+    a { color: var(--accent); text-underline-offset: 3px; }
+    button:focus-visible { outline: 3px solid #e1fff2; outline-offset: 4px; }
+    button:disabled { cursor: not-allowed; opacity: .45; }
+    .app { max-width: 1680px; margin: 0 auto; padding: 28px 36px 24px; }
+    .topbar, .brand, .actions, .status, .section-heading, .camera-heading, .camera-state, .legend, .evidence-row { display: flex; align-items: center; }
+    .topbar { justify-content: space-between; gap: 20px; padding-bottom: 26px; border-bottom: 1px solid var(--line); }
+    .brand { gap: 11px; font-size: 18px; font-weight: 700; letter-spacing: -.5px; }
+    .brand-mark { color: var(--accent); width: 27px; height: 27px; }
+    .brand small { padding-left: 15px; margin-left: 5px; border-left: 1px solid var(--line); color: var(--muted); font-size: 12px; font-weight: 400; letter-spacing: .15px; }
+    .status { gap: 8px; font-size: 12px; color: var(--muted); }
+    .dot { width: 7px; height: 7px; border-radius: 50%; flex: 0 0 auto; background: currentColor; }
+    .status[data-tone="active"] { color: var(--accent); }
+    .status[data-tone="warning"] { color: var(--warning); }
+    .status[data-tone="error"] { color: var(--danger); }
+    .intro { display: flex; align-items: center; justify-content: space-between; gap: 24px; padding: 27px 0 23px; }
+    .eyebrow { margin: 0 0 9px; color: var(--accent); font-size: 10px; font-weight: 650; letter-spacing: 1.8px; text-transform: uppercase; }
+    h1 { margin: 0; font-size: clamp(25px, 2.2vw, 34px); font-weight: 600; letter-spacing: -1px; line-height: 1.2; }
+    .intro p:not(.eyebrow) { margin: 10px 0 0; max-width: 630px; color: var(--muted); font-size: 13px; line-height: 1.6; }
+    .actions { flex-shrink: 0; gap: 9px; }
+    .button { display: inline-flex; align-items: center; justify-content: center; gap: 9px; min-height: 43px; padding: 11px 17px; border-radius: 7px; border: 1px solid var(--line); color: var(--text); background: var(--surface-raised); cursor: pointer; font-size: 12px; font-weight: 600; transition: background .15s; }
+    .button:hover:not(:disabled) { background: #21313e; }
+    .button.primary { border-color: var(--accent); background: var(--accent); color: #0c2920; }
+    .button.primary:hover:not(:disabled) { background: #a1f2d0; }
+    .button svg { width: 13px; height: 13px; fill: currentColor; }
+    .notice { margin: 0 0 19px; padding: 12px 15px; border: 1px solid #755334; border-radius: 7px; background: #211e18; color: #f1d09b; font-size: 12px; line-height: 1.6; }
+    .notice[hidden] { display: none; }
+    .metrics { display: grid; grid-template-columns: 1.25fr 1fr 1fr 1fr; margin-bottom: 25px; border: 1px solid var(--line); border-radius: 9px; background: var(--surface); overflow: hidden; }
+    .metric { min-width: 0; padding: 17px 20px 15px; border-left: 1px solid var(--line); }
+    .metric:first-child { border-left: 0; }
+    .metric-label { color: var(--muted); font-size: 11px; }
+    .metric-value { display: flex; align-items: baseline; gap: 6px; margin: 9px 0 7px; font-family: var(--mono); font-size: 25px; font-weight: 500; font-variant-numeric: tabular-nums; letter-spacing: -.8px; }
+    .metric-unit { color: var(--muted); font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; font-size: 11px; letter-spacing: 0; }
+    .metric-detail { color: var(--muted); font-size: 10px; line-height: 1.5; }
+    .source-progress { width: 100%; height: 3px; display: block; border: 0; border-radius: 3px; margin-top: 11px; background: var(--line); accent-color: var(--accent); }
+    .source-progress::-webkit-progress-bar { border-radius: 3px; background: var(--line); }
+    .source-progress::-webkit-progress-value { border-radius: 3px; background: var(--accent); }
+    .source-progress::-moz-progress-bar { border-radius: 3px; background: var(--accent); }
+    .workspace { display: grid; grid-template-columns: minmax(0, 1fr) 300px; gap: 23px; align-items: start; }
+    .section-heading { justify-content: space-between; gap: 12px; margin-bottom: 12px; min-height: 20px; }
+    h2 { margin: 0; font-size: 13px; font-weight: 600; letter-spacing: -.1px; }
+    .section-meta { font-family: var(--mono); color: var(--muted); font-size: 10px; }
+    .camera-grid { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 12px; }
+    .camera { grid-column: span 2; min-width: 0; overflow: hidden; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); }
+    .camera:nth-child(n+4) { grid-column: span 3; }
+    .camera-heading { justify-content: space-between; flex-wrap: wrap; row-gap: 6px; padding: 11px 12px; border-bottom: 1px solid #202e38; }
+    .camera-name { display: flex; align-items: center; gap: 7px; font-size: 11px; font-weight: 500; }
+    .camera-name svg { width: 13px; height: 13px; color: var(--muted); }
+    .camera-state { gap: 5px; color: var(--muted); font-family: var(--mono); font-size: 9px; }
+    .camera-state .dot { width: 5px; height: 5px; }
+    .camera-state[data-state="detected"] { color: var(--accent); }
+    .camera-state[data-state="tracked"] { color: #9dd9f5; }
+    .camera-state[data-state="coasting"] { color: var(--warning); }
+    .camera-view { position: relative; height: clamp(170px, 14.4vw, 232px); background: #080e14; overflow: hidden; }
+    .camera-view img { width: 100%; height: 100%; display: block; object-fit: contain; }
+    .camera-view img:not([src]), .camera-view img[hidden] { display: none; }
+    .camera-empty { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; color: #6f8291; font-size: 10px; text-align: center; padding: 15px; }
+    .camera-empty[hidden] { display: none; }
+    .camera-empty svg { width: 27px; height: 27px; color: #435765; }
+    .camera-caption { display: flex; justify-content: space-between; gap: 8px; min-height: 30px; padding: 8px 12px; color: var(--muted); font-size: 9px; }
+    .camera-caption span:last-child { font-family: var(--mono); }
+    .camera-note { margin: 12px 0 0; color: var(--muted); font-size: 11px; line-height: 1.6; }
+    .rail { min-width: 0; }
+    .map-panel { border: 1px solid var(--line); border-radius: 8px; background: var(--surface); overflow: hidden; }
+    .track-status { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 15px 14px 0; }
+    .track-status strong { font-size: 12px; font-weight: 500; }
+    .track-badge { font-size: 9px; color: var(--muted); padding: 4px 6px; background: var(--surface-raised); border: 1px solid var(--line); border-radius: 4px; }
+    .track-badge[data-tone="active"] { color: var(--accent); border-color: #355e51; }
+    .track-badge[data-tone="warning"] { color: var(--warning); }
+    .map-wrap { position: relative; height: 255px; margin: 13px 8px 0; }
+    canvas { width: 100%; height: 100%; display: block; }
+    .map-empty { position: absolute; left: 22px; right: 22px; top: 50%; transform: translateY(-50%); margin: 0; text-align: center; color: var(--muted); font-size: 11px; line-height: 1.7; background: #111a23e8; padding: 12px; border-radius: 5px; }
+    .map-empty[hidden] { display: none; }
+    .legend { gap: 7px; padding: 0 14px 13px; color: var(--muted); font-size: 10px; }
+    .legend-mark { width: 15px; height: 2px; background: var(--accent); }
+    .coordinates { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); }
+    .coordinate { padding: 12px 13px; border-left: 1px solid var(--line); }
+    .coordinate:first-child { border-left: 0; }
+    .coordinate span { display: block; margin-bottom: 5px; color: var(--muted); font-size: 9px; }
+    .coordinate strong { font-family: var(--mono); font-size: 12px; font-weight: 400; white-space: nowrap; }
+    .method { padding: 12px 14px; }
+    .method .metric-label { font-size: 10px; }
+    .method p { margin: 6px 0 0; font-size: 11px; line-height: 1.6; }
+    .method-detail { color: var(--muted); }
+    .evidence { padding: 15px 0 0; }
+    .evidence-title { margin: 0 0 10px; font-size: 10px; font-weight: 500; color: var(--muted); }
+    .evidence-row { justify-content: space-between; gap: 14px; margin-top: 8px; color: var(--muted); font-size: 10px; }
+    .evidence-row span:last-child { color: #cbd7e0; text-align: right; font-family: var(--mono); overflow-wrap: anywhere; }
+    .evidence-row[hidden] { display: none; }
+    .scene-note { margin-top: 23px; display: flex; align-items: flex-start; gap: 10px; border-top: 1px solid var(--line); padding-top: 16px; color: var(--muted); font-size: 11px; line-height: 1.7; }
+    .scene-note svg { width: 15px; height: 15px; flex-shrink: 0; margin-top: 2px; }
+    .scene-note p { margin: 0; }
+    .scene-note strong { color: #cbd7e0; font-weight: 500; }
+    .footer { display: flex; justify-content: space-between; gap: 18px; margin-top: 20px; color: #738694; font-size: 9px; letter-spacing: .25px; }
+    @media (min-width: 1500px) { .workspace { grid-template-columns: minmax(0, 1fr) 330px; } .map-wrap { height: 285px; } }
+    @media (max-width: 1100px) { .app { padding: 22px; } .workspace { grid-template-columns: minmax(0, 1fr) 270px; gap: 16px; } .camera-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } .camera, .camera:nth-child(n+4) { grid-column: span 1; } .camera:last-child { grid-column: span 2; } .camera-view { height: 180px; } .camera:last-child .camera-view { height: 210px; } .metric { padding: 15px; } }
+    @media (max-width: 800px) { .intro { align-items: flex-start; flex-direction: column; gap: 18px; } .workspace { grid-template-columns: minmax(0, 1fr); } .rail { margin-top: 8px; } .map-wrap { height: 300px; } .camera-view { height: auto; aspect-ratio: 16 / 10; } .camera:last-child .camera-view { height: 250px; aspect-ratio: auto; } .evidence { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 28px; } .evidence-title { grid-column: 1 / -1; } }
+    @media (max-width: 560px) { .app { padding: 18px 14px; } .topbar { padding-bottom: 19px; gap: 8px; } .brand small { display: none; } .status { font-size: 10px; } h1 { font-size: 27px; } .intro p:not(.eyebrow) { font-size: 12px; } .actions { width: 100%; } .button.primary { flex: 1; } .metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); margin-bottom: 22px; } .metric { padding: 15px; } .metric:nth-child(3) { border-left: 0; } .metric:nth-child(n+3) { border-top: 1px solid var(--line); } .metric-value { font-size: 22px; } .camera-grid { gap: 10px; grid-template-columns: minmax(0, 1fr); } .camera, .camera:nth-child(n+4), .camera:last-child { grid-column: span 1; } .camera-view, .camera:last-child .camera-view { height: auto; aspect-ratio: 16 / 9; } .camera-heading { padding: 11px 12px; } .camera-name { font-size: 12px; } .camera-state { font-size: 10px; } .camera-caption { font-size: 10px; } .section-meta { font-size: 9px; } .footer { flex-direction: column; gap: 7px; } }
+    @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <header class="topbar">
+      <div class="brand">
+        <svg class="brand-mark" viewBox="0 0 28 28" fill="none" aria-hidden="true"><path d="M3 10V3h7M18 3h7v7M25 18v7h-7M10 25H3v-7" stroke="currentColor" stroke-width="1.8"/><circle cx="14" cy="14" r="5" stroke="currentColor" stroke-width="1.8"/><circle cx="14" cy="14" r="1.6" fill="currentColor"/></svg>
+        ПЕЛЕНГ <small>SpaceHackathon / 3D-сопровождение</small>
+      </div>
+      <div class="status" id="app-status" role="status"><span class="dot"></span><span id="app-status-text">Подключение…</span></div>
+    </header>
+
+    <section class="intro" aria-labelledby="page-title">
+      <div>
+        <p class="eyebrow">Компьютерное зрение · 5 камер</p>
+        <h1 id="page-title">Один объект. Пять ракурсов.</h1>
+        <p id="replay-description">Наблюдение за объектом и оценка положения по пяти видеозаписям.</p>
+      </div>
+      <div class="actions">
+        <button class="button primary" id="start-button" type="button" disabled><svg viewBox="0 0 14 14" aria-hidden="true"><path d="M3 1.5 12 7l-9 5.5z"/></svg><span id="start-label">Запустить</span></button>
+        <button class="button" id="stop-button" type="button" disabled><svg viewBox="0 0 14 14" aria-hidden="true"><rect x="3" y="3" width="8" height="8" rx="1"/></svg>Остановить</button>
+      </div>
+    </section>
+
+    <p class="notice" id="notice" role="alert" hidden></p>
+
+    <section class="metrics" aria-label="Показатели обработки">
+      <div class="metric">
+        <div class="metric-label">Время записи</div>
+        <div class="metric-value"><span id="source-time">—</span><span class="metric-unit" id="source-duration"></span></div>
+        <div class="metric-detail" id="source-detail">Ожидание запуска</div>
+        <progress class="source-progress" id="source-progress" value="0" max="1" aria-label="Просмотренная часть записи"></progress>
+      </div>
+      <div class="metric">
+        <div class="metric-label" id="latency-label">Время обработки</div>
+        <div class="metric-value"><span id="latency">—</span><span class="metric-unit">мс</span></div>
+        <div class="metric-detail" id="latency-detail">Режим определяется при запуске</div>
+      </div>
+      <div class="metric">
+        <div class="metric-label">Темп обработки</div>
+        <div class="metric-value"><span id="cadence">—</span><span class="metric-unit">шаг/с</span></div>
+        <div class="metric-detail" id="processing-detail">Время одного шага: —</div>
+      </div>
+      <div class="metric">
+        <div class="metric-label">Пропущено кадров</div>
+        <div class="metric-value"><span id="skipped">—</span><span class="metric-unit">кадр.</span></div>
+        <div class="metric-detail" id="skipped-detail">Счётчик исходных кадров</div>
+      </div>
+    </section>
+
+    <main class="workspace">
+      <section aria-labelledby="cameras-title">
+        <div class="section-heading"><h2 id="cameras-title">Камеры</h2><span class="section-meta" id="camera-count">Ожидание кадров</span></div>
+        <div class="camera-grid" id="camera-grid"></div>
+        <p class="camera-note" id="run-message">Нажмите «Запустить», чтобы начать обработку записи с начала.</p>
+      </section>
+
+      <aside class="rail" aria-labelledby="track-title">
+        <div class="section-heading"><h2 id="track-title">Положение объекта</h2><span class="section-meta">Вид сверху · м</span></div>
+        <section class="map-panel" aria-label="Карта пройденного пути">
+          <div class="track-status"><strong id="track-state">Ожидание объекта</strong><span class="track-badge" id="track-badge">Нет позиции</span></div>
+          <div class="map-wrap">
+            <canvas id="trail-canvas" aria-label="Пройденный путь объекта в координатах X и Y" role="img"></canvas>
+            <p class="map-empty" id="map-empty">Здесь появится путь, когда система определит положение объекта.</p>
+          </div>
+          <div class="legend"><span class="legend-mark"></span>Уже пройденный путь</div>
+          <div class="coordinates" aria-label="Текущие координаты в метрах">
+            <div class="coordinate"><span>X, м</span><strong id="position-x">—</strong></div>
+            <div class="coordinate"><span>Y, м</span><strong id="position-y">—</strong></div>
+            <div class="coordinate"><span>Z, м</span><strong id="position-z">—</strong></div>
+          </div>
+          <div class="method"><div class="metric-label">Способ определения</div><p id="method-name">Ожидание результата</p><p class="method-detail" id="method-detail">Позиция появится после обнаружения объекта.</p></div>
+        </section>
+        <section class="evidence" aria-label="Параметры запуска">
+          <h3 class="evidence-title">Параметры запуска</h3>
+          <div class="evidence-row"><span>Режим</span><span id="replay-mode">Ожидание запуска</span></div>
+          <div class="evidence-row"><span>Устройство</span><span id="device">—</span></div>
+          <div class="evidence-row"><span>Модель</span><span id="model">—</span></div>
+          <div class="evidence-row"><span>Частота записи</span><span id="source-fps">—</span></div>
+          <div class="evidence-row"><span>Обработано шагов</span><span id="processed-steps">—</span></div>
+          <div class="evidence-row"><span>Неопределённость 3D</span><span id="world-uncertainty">—</span></div>
+          <div class="evidence-row"><span>Возраст глубины</span><span id="world-depth-age">—</span></div>
+          <div class="evidence-row"><span>Точка объекта</span><span id="world-reference">—</span></div>
+          <div class="evidence-row"><span>Размеры объёма</span><span id="world-size">—</span></div>
+          <div class="evidence-row" id="download-result" hidden><span>Результат · см</span><a href="/api/result/trajectory.csv" download="trajectory.csv">Таблица координат ↓</a></div>
+        </section>
+      </aside>
+    </main>
+
+    <div class="scene-note">
+      <svg viewBox="0 0 16 16" fill="none" aria-hidden="true"><circle cx="8" cy="8" r="6" stroke="currentColor"/><path d="M8 7v4M8 4.5v.5" stroke="currentColor" stroke-width="1.3"/></svg>
+      <p><strong>Только текущие и уже прошедшие кадры.</strong> Триангуляция оценивает глубину по нескольким камерам. При одном ракурсе глубина опирается на прошлое состояние; плоскость земли условна. Неопределённость рассчитана по модели и не является гарантией точности.</p>
+    </div>
+    <footer class="footer"><span>ПЕЛЕНГ / SPACE HACKATHON</span><span id="connection-detail">Ожидание подключения к обработке</span></footer>
+  </div>
+
+  <script>
+    'use strict';
+    const $ = (id) => document.getElementById(id);
+    const cameraIcon = '<svg viewBox="0 0 20 20" fill="none" aria-hidden="true"><rect x="2" y="5" width="11" height="10" rx="2" stroke="currentColor" stroke-width="1.3"/><path d="m13 8 5-3v10l-5-3" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/></svg>';
+    const emptyIcon = '<svg viewBox="0 0 28 28" fill="none" aria-hidden="true"><path d="M4 10V4h6M18 4h6v6M24 18v6h-6M10 24H4v-6" stroke="currentColor" stroke-width="1.2"/><circle cx="14" cy="14" r="3" stroke="currentColor" stroke-width="1.2"/></svg>';
+    const tiles = Array.from({length: 5}, (_, index) => {
+      const tile = document.createElement('article');
+      tile.className = 'camera';
+      tile.innerHTML = `<div class="camera-heading"><span class="camera-name">${cameraIcon}<span class="camera-title">Камера ${String(index + 1).padStart(2, '0')}</span></span><span class="camera-state"><span class="dot"></span><span class="camera-state-label">Ожидание</span></span></div><div class="camera-view"><img alt="Последний обработанный кадр камеры ${index + 1}" hidden><div class="camera-empty">${emptyIcon}<span>Ожидание первого кадра</span></div></div><div class="camera-caption"><span class="camera-confidence">Объект ещё не найден</span><span class="camera-time">—</span></div>`;
+      $('camera-grid').appendChild(tile);
+      const image = tile.querySelector('img');
+      const empty = tile.querySelector('.camera-empty');
+      image.addEventListener('load', () => { image.hidden = false; empty.hidden = true; });
+      image.addEventListener('error', () => {
+        image.hidden = true;
+        empty.hidden = false;
+        empty.querySelector('span').textContent = 'Кадр пока недоступен';
+      });
+      return {element: tile, image, empty, cameraId: null};
+    });
+
+    let currentState = null;
+    let connected = false;
+    let actionBusy = false;
+    let pollTimer = null;
+    let pollInFlight = false;
+    let lastFrameStep = null;
+    let commandError = '';
+    let visibleTrack = null;
+    let resizeObserver = null;
+    const numberFormatter = new Intl.NumberFormat('ru-RU');
+    const finite = (value) => typeof value === 'number' && Number.isFinite(value);
+    const numeric = (value, digits = 0) => finite(value) ? value.toLocaleString('ru-RU', {minimumFractionDigits: digits, maximumFractionDigits: digits}) : '—';
+    const validPoint = (point, count = 2) => Array.isArray(point) && point.length >= count && point.slice(0, count).every(finite);
+
+    function formatTime(value) {
+      if (!finite(value)) return '—';
+      const seconds = Math.max(0, Math.floor(value));
+      const hours = Math.floor(seconds / 3600);
+      const minutes = Math.floor((seconds % 3600) / 60);
+      const remainder = String(seconds % 60).padStart(2, '0');
+      return hours > 0 ? `${hours}:${String(minutes).padStart(2, '0')}:${remainder}` : `${String(minutes).padStart(2, '0')}:${remainder}`;
+    }
+
+    function setNotice(message) {
+      $('notice').textContent = message;
+      $('notice').hidden = !message;
+    }
+
+    function updateActions() {
+      const running = currentState?.status === 'running';
+      $('start-button').disabled = actionBusy || !connected || running;
+      $('stop-button').disabled = actionBusy || !connected || !running;
+      $('start-label').textContent = actionBusy ? 'Подождите…' : ['finished', 'stopped', 'error'].includes(currentState?.status) ? 'Запустить заново' : 'Запустить';
+    }
+
+    function setConnection(ok) {
+      connected = ok;
+      updateActions();
+      if (!ok) {
+        $('app-status').dataset.tone = 'error';
+        $('app-status-text').textContent = 'Нет соединения';
+        $('connection-detail').textContent = 'Повторное подключение…';
+        setNotice('Не удалось получить данные обработки. Проверьте, что локальный сервер запущен. Подключение восстановится автоматически.');
+      }
+    }
+
+    function resetFrames() {
+      lastFrameStep = null;
+      tiles.forEach(({image, empty, element}) => {
+        image.removeAttribute('src');
+        image.hidden = true;
+        empty.hidden = false;
+        empty.querySelector('span').textContent = 'Ожидание первого кадра';
+        element.querySelector('.camera-time').textContent = '—';
+      });
+    }
+
+    function renderCameras(state) {
+      const cameras = Array.isArray(state.cameras) ? state.cameras : [];
+      const detectedCount = cameras.filter((camera) => camera.measured === true || camera.detected === true).length;
+      $('camera-count').textContent = cameras.length ? `Объект наблюдается: ${detectedCount} из ${cameras.length}` : 'Ожидание кадров';
+      const canRefresh = !['idle', 'error'].includes(state.status) && finite(state.processed_steps) && state.processed_steps > 0;
+      const refresh = canRefresh && state.processed_steps !== lastFrameStep;
+      tiles.forEach((tile, index) => {
+        const camera = cameras[index];
+        if (!camera) { tile.element.hidden = true; return; }
+        tile.element.hidden = false;
+        const cameraState = camera.state || (camera.detected ? 'detected' : 'lost');
+        const badge = tile.element.querySelector('.camera-state');
+        badge.dataset.state = cameraState;
+        tile.element.querySelector('.camera-state-label').textContent = {detected: 'Обнаружен', tracked: 'Сопровождение', coasting: 'Прогноз', lost: 'Не виден'}[cameraState] || 'Ожидание';
+        tile.element.querySelector('.camera-confidence').textContent = camera.detected && finite(camera.confidence) ? `Уверенность ${numeric(camera.confidence * 100)}%` : cameraState === 'tracked' ? 'Наблюдение по текущему изображению' : cameraState === 'coasting' ? 'Кратковременный прогноз' : 'Нет обнаружения';
+        if (tile.cameraId !== camera.id) {
+          tile.cameraId = camera.id;
+          tile.image.removeAttribute('src');
+          tile.image.hidden = true;
+          tile.empty.hidden = false;
+        }
+        tile.element.querySelector('.camera-title').textContent = `Камера ${String(camera.id).padStart(2, '0')}`;
+        if (refresh && camera.id !== null && camera.id !== undefined) {
+          tile.image.src = `/api/frame/${encodeURIComponent(camera.id)}.jpg?v=${encodeURIComponent(state.processed_steps)}`;
+          tile.element.querySelector('.camera-time').textContent = formatTime(state.source_time);
+        }
+      });
+      if (refresh) lastFrameStep = state.processed_steps;
+    }
+
+    function renderTrack(track) {
+      visibleTrack = track || {};
+      const method = visibleTrack.method || 'no_fix';
+      const hasPosition = validPoint(visibleTrack.position_cm, 3);
+      const predicted = method === 'prediction' || method === 'last_known';
+      const methods = {
+        triangulated: ['Триангуляция', 'Положение рассчитано по наблюдениям нескольких камер.'],
+        cuboid_multiview: ['Объём по нескольким ракурсам', 'Положение и размеры машины рассчитаны по её границам в камерах.'],
+        cuboid_singleview: ['Один ракурс и измеренные размеры', 'Глубина определяется по видимому размеру машины. Её объём оценён по прошлым совместным наблюдениям.'],
+        ground_plane: ['Условная плоскость земли', 'Принято Z = 0. Рельеф не измерен; эта оценка отделена от измерения глубины.'],
+        bearing_update: ['Луч камеры + прогноз глубины', 'Наблюдается направление на объект. Глубина берётся из прошлого состояния и модели движения.'],
+        prediction: ['Прогноз по прошлым положениям', 'Объект временно не виден. Это оценка, а не новое обнаружение.'],
+        last_known: ['Последняя известная позиция', `Нового измерения нет. Возраст позиции: ${numeric(visibleTrack.age_s, 2)} с.`],
+        no_fix: ['Нет достоверной позиции', 'Недостаточно наблюдений для определения положения.']
+      };
+      const descriptions = methods[method] || ['Способ не указан', 'Доступны только координаты, полученные от обработки.'];
+      $('method-name').textContent = descriptions[0];
+      $('method-detail').textContent = descriptions[1];
+      const trackState = visibleTrack.state || '';
+      const lost = ['lost', 'no_fix', 'idle', 'not_found'].includes(trackState) || !hasPosition;
+      $('track-state').textContent = hasPosition ? method === 'last_known' ? 'Последнее наблюдение' : predicted ? 'Положение прогнозируется' : lost ? 'Последняя позиция' : 'Объект отслеживается' : 'Ожидание объекта';
+      $('track-badge').textContent = hasPosition ? method === 'last_known' ? 'Нет измерения' : predicted ? 'Прогноз' : lost ? 'Не виден' : 'Есть позиция' : 'Нет позиции';
+      $('track-badge').dataset.tone = hasPosition ? predicted || lost ? 'warning' : 'active' : '';
+      if (hasPosition && !predicted && visibleTrack.mode === 'assumed_ground') {
+        $('track-badge').textContent = 'Z условно';
+        $('track-badge').dataset.tone = 'warning';
+      } else if (hasPosition && method === 'bearing_update') {
+        $('track-badge').textContent = 'Глубина: прогноз';
+        $('track-badge').dataset.tone = 'warning';
+      }
+      ['x', 'y', 'z'].forEach((axis, index) => { $(`position-${axis}`).textContent = hasPosition ? numeric(visibleTrack.position_cm[index] / 100, 2) : '—'; });
+      $('world-uncertainty').textContent = hasPosition && finite(visibleTrack.uncertainty_m) ? `${numeric(visibleTrack.uncertainty_m, 1)} м · модель` : '—';
+      $('world-depth-age').textContent = hasPosition && finite(visibleTrack.depth_age_s) ? `${numeric(visibleTrack.depth_age_s, 2)} с` : '—';
+      $('world-reference').textContent = {front_face_center: 'Центр передней грани', front_ground_contact: 'Передний контакт · Z=0', cuboid_center: 'Центр объёма', bbox_visual_center: 'Центр изображения', approximate_bbox_ground_contact: 'Контакт с землёй'}[visibleTrack.reference_point] || '—';
+      $('world-size').textContent = Array.isArray(visibleTrack.dimensions_cm) && visibleTrack.dimensions_cm.length === 3 && visibleTrack.dimensions_cm.every(finite) ? `${visibleTrack.dimensions_cm.map(v => numeric(v / 100, 1)).join(' × ')} м` : '—';
+      drawTrail();
+    }
+
+    function renderState(state) {
+      if (!state || typeof state !== 'object' || typeof state.status !== 'string') throw new Error('Некорректный ответ сервера');
+      $('download-result').hidden = !state.summary;
+      const prior = currentState;
+      if ((finite(state.processed_steps) && lastFrameStep !== null && state.processed_steps < lastFrameStep) || (state.status === 'running' && prior?.status !== 'running' && state.processed_steps === 0)) resetFrames();
+      currentState = state;
+      setConnection(true);
+      const statusLabels = {idle: 'Готов к запуску', running: 'Обработка идёт', finished: 'Запись завершена', stopped: 'Остановлено', error: 'Ошибка обработки'};
+      $('app-status-text').textContent = statusLabels[state.status] || 'Состояние неизвестно';
+      $('app-status').dataset.tone = state.status === 'running' ? 'active' : state.status === 'error' ? 'error' : state.status === 'stopped' ? 'warning' : '';
+      $('source-time').textContent = formatTime(state.source_time);
+      $('source-duration').textContent = finite(state.source_duration) && state.source_duration > 0 ? `/ ${formatTime(state.source_duration)}` : '';
+      $('source-detail').textContent = finite(state.source_frame) && state.source_frame >= 0 ? `Кадр ${numberFormatter.format(state.source_frame)}` : 'Ожидание первого кадра';
+      $('source-progress').max = finite(state.source_duration) && state.source_duration > 0 ? state.source_duration : 1;
+      $('source-progress').value = finite(state.source_time) ? Math.max(0, Math.min(state.source_time, $('source-progress').max)) : 0;
+      const replayMode = state.replay_mode || state.summary?.replay_mode;
+      const batch = replayMode === 'batch';
+      const live = replayMode === 'live';
+      $('replay-mode').textContent = batch ? 'Полный проход' : live ? 'Реальный темп' : 'Ожидание запуска';
+      $('replay-description').textContent = batch ? 'Все кадры пяти камер по порядку, без пропусков. Скорость зависит от компьютера.' : live ? 'Повтор пяти синхронных записей в реальном темпе. Устаревшие кадры могут пропускаться.' : 'Наблюдение за объектом и оценка положения по пяти видеозаписям.';
+      $('latency-label').textContent = batch ? 'Время шага' : live ? 'Отставание от записи' : 'Время обработки';
+      $('latency').textContent = batch ? numeric(state.processing_ms) : live ? numeric(state.latency_ms) : '—';
+      $('latency-detail').textContent = batch ? 'Один пакет из пяти камер' : live ? 'Задержка текущего результата' : 'Режим определяется при запуске';
+      $('skipped-detail').textContent = batch ? 'Полный проход всех кадров' : live ? 'Чтобы сохранять реальный темп' : 'Счётчик исходных кадров';
+      $('cadence').textContent = numeric(state.effective_fps, 1);
+      $('processing-detail').textContent = `Время одного шага: ${numeric(state.processing_ms)} мс`;
+      $('skipped').textContent = numeric(state.skipped_frames);
+      $('device').textContent = state.device || '—';
+      $('model').textContent = state.model || '—';
+      $('source-fps').textContent = finite(state.source_fps) && state.source_fps > 0 ? `${numeric(state.source_fps, 1)} кадр/с` : '—';
+      $('processed-steps').textContent = numeric(state.processed_steps);
+      const fallbackMessages = {idle: 'Нажмите «Запустить», чтобы начать обработку записи с начала.', running: batch ? 'Все кадры обрабатываются по порядку. На CPU запись может идти медленнее реального времени.' : live ? 'Устаревшие кадры пропускаются, чтобы сохранять реальный темп.' : 'Подготовка обработки записи.', finished: 'Запись завершена. На экране — последний обработанный результат.', stopped: 'Обработка остановлена. Последний результат сохранён на экране.', error: 'Обработка прервана. Можно попробовать запустить запись заново.'};
+      $('run-message').textContent = state.message || fallbackMessages[state.status] || 'Ожидание данных.';
+      $('connection-detail').textContent = state.status === 'running' ? batch ? 'Подключено · полный проход' : live ? 'Подключено · реальный темп' : 'Подключено · подготовка' : 'Подключено к локальной обработке';
+      setNotice(commandError || (state.status === 'error' ? state.message || 'Не удалось обработать запись. Попробуйте запустить её заново.' : ''));
+      renderCameras(state);
+      renderTrack(state.track);
+      updateActions();
+    }
+
+    function niceStep(span) {
+      const rough = Math.max(span / 4, .001);
+      const power = Math.pow(10, Math.floor(Math.log10(rough)));
+      const fraction = rough / power;
+      return (fraction <= 1 ? 1 : fraction <= 2 ? 2 : fraction <= 5 ? 5 : 10) * power;
+    }
+
+    function drawTrail() {
+      const canvas = $('trail-canvas');
+      const rectangle = canvas.getBoundingClientRect();
+      if (!rectangle.width || !rectangle.height) return;
+      const pixelRatio = Math.min(window.devicePixelRatio || 1, 2);
+      canvas.width = Math.round(rectangle.width * pixelRatio);
+      canvas.height = Math.round(rectangle.height * pixelRatio);
+      const context = canvas.getContext('2d');
+      if (!context) return;
+      context.scale(pixelRatio, pixelRatio);
+      const width = rectangle.width;
+      const height = rectangle.height;
+      const bounds = {left: 35, right: width - 16, top: 17, bottom: height - 30};
+      const trail = Array.isArray(visibleTrack?.trail) ? visibleTrack.trail.map((point) => validPoint(point) ? [point[0] / 100, point[1] / 100] : null) : [];
+      const validTrail = trail.filter((point) => point !== null);
+      const position = validPoint(visibleTrack?.position_cm, 3) ? [visibleTrack.position_cm[0] / 100, visibleTrack.position_cm[1] / 100] : null;
+      const points = position ? [...validTrail, position] : validTrail;
+      $('map-empty').hidden = points.length > 0;
+      let minX = -5, maxX = 5, minY = -5, maxY = 5;
+      if (points.length) {
+        minX = Math.min(...points.map((point) => point[0]));
+        maxX = Math.max(...points.map((point) => point[0]));
+        minY = Math.min(...points.map((point) => point[1]));
+        maxY = Math.max(...points.map((point) => point[1]));
+        const centreX = (minX + maxX) / 2;
+        const centreY = (minY + maxY) / 2;
+        const rangeX = Math.max(maxX - minX, 4) * 1.35;
+        const rangeY = Math.max(maxY - minY, 4) * 1.35;
+        const scale = Math.max(rangeX / (bounds.right - bounds.left), rangeY / (bounds.bottom - bounds.top));
+        minX = centreX - scale * (bounds.right - bounds.left) / 2;
+        maxX = centreX + scale * (bounds.right - bounds.left) / 2;
+        minY = centreY - scale * (bounds.bottom - bounds.top) / 2;
+        maxY = centreY + scale * (bounds.bottom - bounds.top) / 2;
+      }
+      const mapX = (value) => bounds.left + (value - minX) / (maxX - minX) * (bounds.right - bounds.left);
+      const mapY = (value) => bounds.bottom - (value - minY) / (maxY - minY) * (bounds.bottom - bounds.top);
+      const step = niceStep(Math.max(maxX - minX, maxY - minY));
+      const labelDigits = step < 1 ? Math.min(3, Math.max(1, -Math.floor(Math.log10(step)))) : 0;
+      context.font = '9px ui-monospace, SFMono-Regular, Consolas, monospace';
+      context.lineWidth = 1;
+      context.strokeStyle = '#25323d';
+      context.fillStyle = '#7b8f9e';
+      context.textAlign = 'center';
+      for (let value = Math.ceil(minX / step) * step; value <= maxX; value += step) {
+        const x = mapX(value);
+        context.beginPath(); context.moveTo(x, bounds.top); context.lineTo(x, bounds.bottom); context.stroke();
+        context.fillText(numeric(Math.abs(value) < step / 100 ? 0 : value, labelDigits), x, height - 13);
+      }
+      context.textAlign = 'right';
+      for (let value = Math.ceil(minY / step) * step; value <= maxY; value += step) {
+        const y = mapY(value);
+        context.beginPath(); context.moveTo(bounds.left, y); context.lineTo(bounds.right, y); context.stroke();
+        context.fillText(numeric(Math.abs(value) < step / 100 ? 0 : value, labelDigits), bounds.left - 7, y + 3);
+      }
+      context.fillStyle = '#9aabb9';
+      context.textAlign = 'left';
+      context.fillText('Y', bounds.left - 4, 10);
+      context.textAlign = 'right';
+      context.fillText('X', width - 5, height - 13);
+      if (trail.length) {
+        context.save();
+        context.beginPath(); context.rect(bounds.left, bounds.top, bounds.right - bounds.left, bounds.bottom - bounds.top); context.clip();
+        context.strokeStyle = '#7ae8bc';
+        context.lineWidth = 2;
+        context.lineJoin = 'round';
+        context.lineCap = 'round';
+        context.beginPath();
+        let penDown = false;
+        trail.forEach((point) => {
+          if (!point) { penDown = false; return; }
+          if (!penDown) context.moveTo(mapX(point[0]), mapY(point[1]));
+          else context.lineTo(mapX(point[0]), mapY(point[1]));
+          penDown = true;
+        });
+        context.stroke();
+        if (validTrail.length === 1) { context.beginPath(); context.arc(mapX(validTrail[0][0]), mapY(validTrail[0][1]), 2, 0, Math.PI * 2); context.fillStyle = '#7ae8bc'; context.fill(); }
+        context.restore();
+      }
+      if (position) {
+        const x = mapX(position[0]);
+        const y = mapY(position[1]);
+        const color = ['prediction','last_known'].includes(visibleTrack.method) ? '#efc574' : '#7ae8bc';
+        context.beginPath(); context.arc(x, y, 9, 0, Math.PI * 2); context.fillStyle = color + '22'; context.fill();
+        context.beginPath(); context.arc(x, y, 4, 0, Math.PI * 2); context.fillStyle = color; context.fill(); context.strokeStyle = '#111a23'; context.lineWidth = 1.5; context.stroke();
+      }
+    }
+
+    function schedulePoll(delay) {
+      window.clearTimeout(pollTimer);
+      if (!document.hidden) pollTimer = window.setTimeout(pollState, delay);
+    }
+
+    async function pollState() {
+      if (document.hidden || pollInFlight) return;
+      pollInFlight = true;
+      const controller = new AbortController();
+      const timeout = window.setTimeout(() => controller.abort(), 5000);
+      try {
+        const response = await fetch('/api/state', {cache: 'no-store', signal: controller.signal});
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        renderState(await response.json());
+      } catch (error) {
+        setConnection(false);
+      } finally {
+        window.clearTimeout(timeout);
+        pollInFlight = false;
+        schedulePoll(connected ? 200 : 1500);
+      }
+    }
+
+    async function sendAction(action) {
+      if (actionBusy || !connected) return;
+      actionBusy = true;
+      commandError = '';
+      updateActions();
+      setNotice('');
+      const controller = new AbortController();
+      const timeout = window.setTimeout(() => controller.abort(), 15000);
+      try {
+        const response = await fetch(`/api/${action}`, {method: 'POST', signal: controller.signal});
+        if (!response.ok) {
+          let detail = '';
+          try { const body = await response.json(); detail = typeof body.detail === 'string' ? body.detail : typeof body.message === 'string' ? body.message : ''; } catch (_) {}
+          throw new Error(detail || `Сервер вернул ошибку ${response.status}.`);
+        }
+        if (action === 'start') resetFrames();
+        schedulePoll(0);
+      } catch (error) {
+        commandError = error.name === 'AbortError' ? 'Сервер долго отвечает. Состояние запуска будет проверено автоматически.' : `Не удалось ${action === 'start' ? 'запустить' : 'остановить'} обработку. ${error.message}`;
+        setNotice(commandError);
+      } finally {
+        window.clearTimeout(timeout);
+        actionBusy = false;
+        updateActions();
+      }
+    }
+
+    $('start-button').addEventListener('click', () => sendAction('start'));
+    $('stop-button').addEventListener('click', () => sendAction('stop'));
+    document.addEventListener('visibilitychange', () => {
+      window.clearTimeout(pollTimer);
+      if (!document.hidden) { drawTrail(); schedulePoll(0); }
+    });
+    if (typeof ResizeObserver !== 'undefined') {
+      resizeObserver = new ResizeObserver(drawTrail);
+      resizeObserver.observe($('trail-canvas').parentElement);
+    } else {
+      window.addEventListener('resize', drawTrail);
+    }
+    drawTrail();
+    pollState();
+  </script>
+</body>
+</html>
