@@ -22,10 +22,14 @@ class VehicleDetector:
             raise FileNotFoundError(f'Missing model: {weights}. Run ./setup.sh first.')
         self.model = YOLO(str(weights))
         self.name = weights.stem
+        self.vehicle_classes = [int(i) for i, name in self.model.names.items()
+                                if str(name).lower() in {'car', 'bus', 'truck', 'vehicle', 'грузовик'}]
+        if not self.vehicle_classes:
+            raise ValueError('Weights must expose a car, bus, truck or vehicle detection class')
 
     def predict(self, frames):
         results = self.model.predict(frames, imgsz=self.image_size, conf=0.20,
-                                     classes=[2, 5, 7], device=self.device,
+                                     classes=self.vehicle_classes, device=self.device,
                                      verbose=False, save=False)
         observations = []
         for result in results:

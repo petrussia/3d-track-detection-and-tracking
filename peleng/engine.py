@@ -304,15 +304,18 @@ class Engine:
                     jpeg,thumbnail = annotate(image,current,camera_id,timestamp,point)
                     jpeg_images[camera_id] = jpeg
                     thumbnails.append(thumbnail)
-                latest_montage = np.zeros((720,1920,3),dtype=np.uint8)
+                # Reserve one tile for metadata, including with 6+ cameras.
+                montage_rows = math.ceil((len(thumbnails) + 1) / 3)
+                latest_montage = np.zeros((montage_rows*360,1920,3),dtype=np.uint8)
                 for i,thumbnail in enumerate(thumbnails):
                     x,y = (i%3)*640,(i//3)*360
                     latest_montage[y:y+360,x:x+640] = thumbnail
-                cv2.putText(latest_montage,'CAUSAL '+self.replay_mode.upper()+' REPLAY',(1300,440),
+                info_x,info_y=(len(thumbnails)%3)*640+20,(len(thumbnails)//3)*360
+                cv2.putText(latest_montage,'CAUSAL '+self.replay_mode.upper()+' REPLAY',(info_x,info_y+80),
                             cv2.FONT_HERSHEY_SIMPLEX,.8,(100,220,170),2,cv2.LINE_AA)
-                cv2.putText(latest_montage,'No future frames / no trajectory input',(1300,480),
+                cv2.putText(latest_montage,'No future frames / no trajectory input',(info_x,info_y+120),
                             cv2.FONT_HERSHEY_SIMPLEX,.52,(200,210,220),1,cv2.LINE_AA)
-                cv2.putText(latest_montage,'World position: approximate',(1300,520),
+                cv2.putText(latest_montage,'World position: approximate',(info_x,info_y+160),
                             cv2.FONT_HERSHEY_SIMPLEX,.6,(210,215,225),1,cv2.LINE_AA)
                 skipped += max(0,frame_index-previous_frame-1)
                 with self._lock:
