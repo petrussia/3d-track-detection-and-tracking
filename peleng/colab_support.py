@@ -175,7 +175,7 @@ def run_notebook(dataset, weights, outputs, backup, imgsz=960, reference='center
     run_dir=Path(state['summary']['run_dir'])
     export_metres(run_dir)
     environment={'python':sys.version,'torch':torch.__version__,'gpu':torch.cuda.get_device_name(0),
-                 'dataset':str(dataset['videos']),'reference':reference,'imgsz':imgsz,
+                 'dataset':str(dataset['videos']),'reference':reference,'imgsz':imgsz,'weights_name':Path(weights).name,
                  'weights_sha256':hashlib.sha256(Path(weights).read_bytes()).hexdigest(),
                  'git_commit':subprocess.check_output(['git','rev-parse','HEAD'],text=True).strip()}
     (run_dir/'environment.json').write_text(json.dumps(environment,indent=2),encoding='utf-8')
@@ -194,7 +194,11 @@ def compare_runs(root):
     for file in Path(root).rglob('scores.json'):
         s=json.loads(file.read_text());env=file.parent/'environment.json'
         env=json.loads(env.read_text()) if env.exists() else {}
+        config_path=file.parent/'config.json'
+        config=json.loads(config_path.read_text()) if config_path.exists() else {}
         rows.append({'run':file.parent.name,'dataset':env.get('dataset'),
+                     'model':env.get('weights_name',config.get('model_path',config.get('weights'))),
+                     'imgsz':env.get('imgsz'),
                      'reference':s['output_reference'],'RMSE_m':s['all_estimate_metrics']['three_d']['rmse_m'],
                      'MSE_m2':s['all_estimate_metrics']['three_d']['mse_m2'],
                      'coverage_pct':s['coordinate_coverage_pct'],
