@@ -23,6 +23,7 @@ from .world import WorldTrack
 from .reference import select_reference, reference_from_center, orient_reference
 from .initialization import LeadingContact
 from .silhouette import center_observations
+from .inputs import camera_video
 
 
 def initial_state():
@@ -133,7 +134,7 @@ class Engine:
             camera_ids = rig.camera_ids
             metadata = []
             for camera_id in camera_ids:
-                path = self.data_dir / f'Way1.FinalImage.CineCameraActor{camera_id}.mp4'
+                path = camera_video(self.data_dir, camera_id)
                 capture = cv2.VideoCapture(str(path))
                 if not capture.isOpened():
                     raise ValueError(f'Cannot open camera video: {path.name}')

@@ -182,6 +182,9 @@ def run_notebook(dataset, weights, outputs, backup, imgsz=960, reference='center
     (run_dir/'pip-freeze.txt').write_text(subprocess.check_output([sys.executable,'-m','pip','freeze'],text=True),encoding='utf-8')
     try:
         if dataset['truth']: score_run(run_dir,dataset['truth'],info['frames_per_camera'],dataset['truth_reference'])
+        else:
+            from .prediction_report import write_prediction_report
+            write_prediction_report(run_dir, info['frames_per_camera'])
     finally:
         shutil.copytree(run_dir,Path(backup)/run_dir.name,dirs_exist_ok=True)
     show_report(run_dir)

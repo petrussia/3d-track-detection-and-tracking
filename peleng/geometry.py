@@ -67,15 +67,28 @@ def _read_camera(path: Path, width: int, height: int) -> _Camera:
         indexes = [header.index(name) for name in _COLUMNS]
         focal_index = next((index for index, cell in enumerate(header)
                             if cell.lower() == "focal length"), None)
-        if focal_index is None or focal_index + 1 >= len(header):
+        if 'Focal_Length_mm' in header:
+            column = header.index('Focal_Length_mm')
+            focals = {_number(row[column]) for row in rows[1:] if row and any(cell.strip() for cell in row)}
+            if len(focals) != 1:
+                raise ValueError('Variable focal length is not supported')
+            focal = focals.pop()
+        elif focal_index is None or focal_index + 1 >= len(header):
             raise ValueError("missing focal length metadata")
-        focal = _number(header[focal_index + 1])
+        else:
+            focal = _number(header[focal_index + 1])
         sensor = None
         for cell in rows[1][max(indexes) + 1:]:
             match = re.search(r"(\d+(?:[.,]\d+)?)\s*[*x×]\s*(\d+(?:[.,]\d+)?)", cell)
             if match:
                 sensor = (_number(match[1]), _number(match[2]))
                 break
+        matrix = path.parent / 'matrix_size.txt'
+        if sensor is None and matrix.exists():
+            match = re.search(r'(\d+(?:[.,]\d+)?)\s*(?:mm)?\s*[*x×]\s*(\d+(?:[.,]\d+)?)',
+                              matrix.read_text(encoding='utf-8-sig'), re.I)
+            if match:
+                sensor = (_number(match[1]), _number(match[2]))
         if sensor is None:
             raise ValueError("missing sensor dimensions in first pose row")
         if min(focal, *sensor) <= 0:

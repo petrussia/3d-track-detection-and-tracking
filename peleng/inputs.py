@@ -7,13 +7,21 @@ import cv2
 from .geometry import CameraRig
 
 
+def camera_video(directory, camera_id):
+    directory = Path(directory)
+    matches = sorted(directory.glob(f'*.FinalImage.CineCameraActor{camera_id}.mp4'))
+    if len(matches) > 1:
+        raise ValueError(f'Ambiguous camera video {camera_id}: {[p.name for p in matches]}')
+    return matches[0] if matches else directory/f'Way1.FinalImage.CineCameraActor{camera_id}.mp4'
+
+
 def inspect_dataset(directory):
     directory = Path(directory)
     rig = CameraRig(directory)
     streams = []
     warnings = []
     for camera_id in rig.camera_ids:
-        path = directory/f'Way1.FinalImage.CineCameraActor{camera_id}.mp4'
+        path = camera_video(directory, camera_id)
         capture = cv2.VideoCapture(str(path))
         try:
             if not capture.isOpened():
