@@ -1,6 +1,7 @@
 import json
 from pathlib import Path
 import importlib.util
+import sys
 
 import cv2
 import numpy as np
@@ -10,6 +11,11 @@ spec = importlib.util.spec_from_file_location(
     'adapt_detector', Path(__file__).parents[1] / 'scripts/adapt_scene_detector.py')
 adapt = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(adapt)
+sys.modules['adapt_scene_detector'] = adapt
+selection_spec = importlib.util.spec_from_file_location(
+    'select_detector', Path(__file__).parents[1] / 'scripts/select_scene_detector.py')
+selection = importlib.util.module_from_spec(selection_spec)
+selection_spec.loader.exec_module(selection)
 
 
 def test_prevent_same_timestamp_in_train_and_test(tmp_path):
@@ -49,3 +55,16 @@ def test_crops_keep_edge_box_and_negatives_stay_empty(tmp_path, monkeypatch):
         assert h*image.shape[0] == pytest.approx(700, abs=.001)
     with pytest.raises(ValueError, match='new destination'):
         adapt.prepare(tmp_path, annotations, target)
+
+
+def test_operating_threshold_counts_duplicate_and_background_boxes():
+    rows = [
+        {'truth': [[0, 0, 10, 10]], 'predictions': [[0, 0, 10, 10], [0, 0, 10, 10]], 'confidence': [.9, .3]},
+        {'truth': [], 'predictions': [[0, 0, 10, 10]], 'confidence': [.4]},
+        {'truth': [[0, 0, 10, 10]], 'predictions': [], 'confidence': []},
+    ]
+    low = selection.score(rows, .2)
+    high = selection.score(rows, .5)
+    assert (low['tp'], low['fp'], low['fn']) == (1, 2, 1)
+    assert (high['tp'], high['fp'], high['fn']) == (1, 0, 1)
+    assert high['f1'] == pytest.approx(2/3)
