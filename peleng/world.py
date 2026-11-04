@@ -21,6 +21,7 @@ class WorldTrack:
         self.timestamp = None
         self.last_seen = None
         self.last_metric = None
+        self.last_independent_depth = None
         self.last_method = None
         self.depth_source = None
         self.mode = None
@@ -67,6 +68,13 @@ class WorldTrack:
         if not math.isfinite(timestamp) or (self.timestamp is not None and timestamp < self.timestamp):
             raise ValueError('World time must be finite and cannot go backwards')
         point = covariance = None
+        raw_measurement = measurement
+        blocked_reason = None
+        # A clipped silhouette can fit a box perfectly without observing range.
+        if (measurement is not None and measurement.get('method') == 'cuboid_singleview'
+                and measurement.get('partial_silhouette', False)):
+            blocked_reason = 'partial_singleview_depth'
+            measurement = None
         bearing = measurement is not None and measurement.get('method') == 'bearing_update'
         direction = origin = None
         if measurement is not None:
@@ -90,7 +98,7 @@ class WorldTrack:
             self._predict(timestamp-self.timestamp)
         self.timestamp = timestamp
         accepted = False
-        reason = None
+        reason = blocked_reason
         reinitialized = False
         depth_expired = self.mode == 'metric_3d' and timestamp-self.last_metric > self.max_bearing_s
         next_mode = ('assumed_ground' if measurement and measurement['method'] == 'ground_plane'
@@ -98,9 +106,9 @@ class WorldTrack:
         mode_changed = measurement is not None and not bearing and next_mode != self.mode
         reference_changed = (measurement is not None and not bearing and self.reference_point is not None
                              and measurement.get('reference_point', self.reference_point) != self.reference_point)
-        ground_handoff = (measurement is not None and next_mode == 'assumed_ground'
-                          and self.ground_cameras != measurement.get('cameras'))
-        if measurement is not None and not bearing and (not self.initialized or expired or depth_expired or mode_changed or ground_handoff or reference_changed):
+        independent_depth = bool(measurement is not None and not bearing and
+            measurement.get('metric_depth_observed', measurement['method'] == 'triangulated'))
+        if measurement is not None and not bearing and (not self.initialized or expired or depth_expired or mode_changed or reference_changed):
             self.x = np.r_[point, np.zeros(3)]
             self.p = np.zeros((6, 6))
             self.p[:3, :3] = covariance
@@ -108,6 +116,8 @@ class WorldTrack:
             accepted = True
             reinitialized = was_initialized
             self.mode = next_mode
+            self.last_metric = timestamp
+            self.depth_source = measurement['method']
             self.segment_id += 1
         elif measurement is not None and self.initialized and not depth_expired and (not bearing or self.mode == 'metric_3d'):
             h = np.zeros((3, 6))
@@ -187,8 +197,12 @@ class WorldTrack:
                 # this extra floor is conservative, not an exact bias-state filter.
                 self.systematic_covariance = np.asarray(measurement.get('systematic_covariance_cm2', np.zeros((3, 3))))
             if not bearing:
+                # A full silhouette with learned size supports range, but does not
+                # renew independent multi-camera depth. Keep the clocks separate.
                 self.last_metric = timestamp
                 self.depth_source = measurement['method']
+                if independent_depth:
+                    self.last_independent_depth = timestamp
                 self.ground_cameras = measurement.get('cameras') if self.mode == 'assumed_ground' else None
         age = timestamp - self.last_seen if self.last_seen is not None else math.inf
         depth_age = timestamp-self.last_metric if self.last_metric is not None else math.inf
@@ -200,10 +214,13 @@ class WorldTrack:
                 'method': self.last_method if state == 'observed' else 'prediction' if alive else None,
                 'age_s': age if math.isfinite(age) else None,
                 'depth_age_s': depth_age if math.isfinite(depth_age) else None,
+                'depth_support_age_s': depth_age if math.isfinite(depth_age) else None,
+                'independent_depth_age_s': (timestamp-self.last_independent_depth
+                    if self.last_independent_depth is not None else None),
                 'depth_source': self.depth_source, 'uncertainty_m': uncertainty,
                 'mode': self.mode, 'segment_id': self.segment_id, 'mode_reset': bool(reinitialized),
                 'reference_point': self.reference_point,
-                'measurement_accepted': accepted, 'raw_measurement': measurement,
+                'measurement_accepted': accepted, 'raw_measurement': raw_measurement,
                 'rejection_reason': reason, 'reinitialized': reinitialized,
                 'reacquisition_reason':reacquisition_reason,
                 'metric_depth_observed': bool(accepted and not bearing and

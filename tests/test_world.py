@@ -222,17 +222,43 @@ class WorldTests(unittest.TestCase):
         self.assertEqual(result['rejection_reason'], 'motion_gate')
         self.assertLess(abs(result['position_cm'][0]), 1000)
 
-    def test_ground_camera_handoff_starts_new_segment_without_learning_bias_velocity(self):
+    def test_ground_camera_handoff_is_gated_without_reset(self):
         t = self.make()
         first = fix(1000, z=0)
         first.update(method='ground_plane', cameras=[1])
         a = t.update(first, 0)
-        second = fix(1500, z=0)
+        second = fix(15000, z=0)
         second.update(method='ground_plane', cameras=[2])
         b = t.update(second, .1)
         self.assertEqual(b['velocity_cm_s'], [0., 0., 0.])
-        self.assertTrue(b['mode_reset'])
-        self.assertGreater(b['segment_id'], a['segment_id'])
+        self.assertFalse(b['measurement_accepted'])
+        self.assertFalse(b['mode_reset'])
+        self.assertEqual(b['segment_id'], a['segment_id'])
+        self.assertAlmostEqual(b['position_cm'][0],1000)
+
+    def test_singleview_range_support_does_not_renew_independent_depth(self):
+        t=self.make(max_bearing_s=1.)
+        t.update(fix(1000),0)
+        single=fix(1000)
+        single.update(method='cuboid_singleview',metric_depth_observed=False)
+        for timestamp in [.2,.4,.6,.8,1.1]:
+            result=t.update(single,timestamp)
+            self.assertTrue(result['measurement_accepted'])
+            self.assertAlmostEqual(result['depth_support_age_s'],0.)
+            self.assertAlmostEqual(result['independent_depth_age_s'],timestamp)
+        self.assertEqual(t.update(fix(1000),1.2)['independent_depth_age_s'],0.)
+
+    def test_partial_singleview_does_not_move_track_even_with_perfect_pixel_fit(self):
+        t=self.make()
+        t.update(fix(1000),0)
+        partial=fix(1400,z=-300)
+        partial.update(method='cuboid_singleview',metric_depth_observed=False,
+                       partial_silhouette=True,fit_rms_px=0.)
+        result=t.update(partial,.1)
+        self.assertFalse(result['measurement_accepted'])
+        self.assertEqual(result['rejection_reason'],'partial_singleview_depth')
+        self.assertEqual(result['position_cm'],[1000.,0.,100.])
+        self.assertEqual(result['raw_measurement'],partial)
 
 
 if __name__ == '__main__':
