@@ -6,6 +6,7 @@ only after inference, never passed to Engine. Scene2 has no accuracy score.
 import argparse
 import json
 from pathlib import Path
+import signal
 import subprocess
 import sys
 
@@ -80,7 +81,14 @@ def main():
         request = dict(name=name,code=str(code),data=str(data),weights=str(weights),reference=reference,
             confidence=confidence,dimensions=dimensions,truth=str(truth) if truth else None,
             output=str(args.outputs/name),backup=str(args.backup/name))
-        subprocess.run([sys.executable,'-u','-c',WORKER,json.dumps(request)],cwd=code,check=True)
+        process = subprocess.Popen([sys.executable,'-u','-c',WORKER,json.dumps(request)],cwd=code)
+        try:
+            if process.wait():
+                raise RuntimeError(f'{name} failed; inspect its saved output and progress log')
+        except KeyboardInterrupt:
+            process.send_signal(signal.SIGINT)
+            process.wait()
+            raise
 
 
 if __name__ == '__main__':

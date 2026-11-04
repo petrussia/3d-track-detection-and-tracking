@@ -57,6 +57,42 @@ class SlowDetector:
 
 
 class EngineTests(unittest.TestCase):
+    def test_front_cannot_initialize_from_body_pose_pending_confirmation(self):
+        with tempfile.TemporaryDirectory() as directory:
+            folder = Path(directory)
+            (folder/'object_transform_CineCameraActor1.csv').write_text(
+                'Frame;Loc_X;Loc_Y;Loc_Z;Rot_Roll;Rot_Pitch;Rot_Yaw;;;Focal length;35\n'
+                '0;0;0;100;0;0;0;;;матрица;23,76*13,365мм\n', encoding='cp1251')
+            clock = Clock()
+            class Evidence:
+                def __init__(self, rig): pass
+                def update(self, *args): return [[]]
+            class Shape:
+                def __init__(self, rig): pass
+                def update(self, frame, *args, **kwargs):
+                    if frame == 0: return None
+                    return dict(position_cm=[1000,0,100], center_cm=[1000,0,100],
+                        front_cm=[2000,0,100], front_observable=True,
+                        dimensions_cm=[2000,400,200], yaw_rad=0., method='cuboid_singleview',
+                        cameras=[1], covariance_cm2=(np.eye(3)*10000).tolist(),
+                        metric_depth_observed=False)
+            ground = dict(position_cm=[1000,0,0], method='ground_plane', cameras=[1],
+                          covariance_cm2=(np.eye(3)*10000).tolist(), metric_depth_observed=False)
+            engine = Engine(folder, folder/'unused.pt', folder/'outputs', replay_mode='batch',
+                detector_factory=lambda:SlowDetector(clock), recovery_factory=Evidence, shape_factory=Shape)
+            with patch('peleng.engine.time.perf_counter', clock.read), \
+                    patch('peleng.engine.cv2.VideoCapture', Capture), \
+                    patch('peleng.engine.cv2.imwrite', return_value=True), \
+                    patch('peleng.engine.estimate_measurement', return_value=ground):
+                engine._run()
+            state = engine.snapshot()
+            self.assertEqual(state['status'], 'finished', state['message'])
+            rows = [json.loads(s) for s in (Path(state['summary']['run_dir'])/'observations.jsonl').read_text().splitlines()]
+            self.assertTrue(all(r['world']['position_cm'] is None for r in rows))
+            self.assertFalse(rows[1]['world']['body_measurement_accepted'])
+            self.assertIsNotNone(rows[1]['world']['blocked_reference_measurement'])
+            self.assertIn('reference_changed', rows[1]['world']['body_rejection_reason'])
+
     def test_front_ground_bootstrap_never_enters_body_center_observer(self):
         with tempfile.TemporaryDirectory() as folder:
             folder=Path(folder)

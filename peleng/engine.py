@@ -184,7 +184,7 @@ class Engine:
                       'detector_confidence': self.confidence,
                       'shape_dimensions_m': self.shape_dimensions_m,
                       'source_fps': fps, 'coordinate_units': 'cm',
-                      'reference_point': self.reference, 'algorithm': 'causal_consensus_shape_confirmed_reacquisition_v3',
+                      'reference_point': self.reference, 'algorithm': 'causal_consensus_shape_body_gated_reference_v4',
                       'world_max_coast_s': .5, 'world_max_bearing_s': 5.,
                       'world_max_speed_cm_s': 5000., 'world_max_correction_floor_cm': 1000.,
                       'fallback_policy': 'internal_ground_only_until_named_reference_available',
@@ -284,7 +284,14 @@ class Engine:
                 else:
                     fix = (reference_from_center(raw_center_fix,reference_model,self.reference)
                            if reference_model is not None else legacy_fix)
-                world = world_track.update(fix, timestamp)
+                # A derived reference cannot be accepted before the body pose
+                # it depends on. In particular, an uninitialized front filter
+                # must not bypass the body's ground-to-metric confirmation.
+                blocked_reference = fix if fix is not None and not body['measurement_accepted'] else None
+                world = world_track.update(None if blocked_reference is not None else fix, timestamp)
+                world.update(body_measurement_accepted=body['measurement_accepted'],
+                             body_rejection_reason=body['rejection_reason'],
+                             blocked_reference_measurement=blocked_reference)
                 if shape_checkpoint is not None and (not body['measurement_accepted']
                         or (fix is not None and not world['measurement_accepted'])):
                     shape_estimator.restore_geometry(shape_checkpoint)
