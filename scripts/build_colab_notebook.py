@@ -29,7 +29,9 @@ if not REPO.exists():
 else:
     subprocess.run(['git','-C',str(REPO),'pull','--ff-only'],check=True)
 os.chdir(REPO)
-subprocess.run([sys.executable,'-m','pip','install','-q','-r','requirements-colab.txt'],check=True)
+install = subprocess.run([sys.executable,'-m','pip','install','-q','-r','requirements-colab.txt'],capture_output=True,text=True)
+if install.returncode:
+    raise RuntimeError(install.stdout + install.stderr)
 if str(REPO) not in sys.path: sys.path.insert(0,str(REPO))
 import torch
 assert torch.cuda.is_available(), 'Включите GPU: Среда выполнения → Сменить среду выполнения → T4'
