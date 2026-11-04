@@ -62,7 +62,7 @@ def main():
     parser.add_argument('--baseline-code', type=Path, required=True)
     parser.add_argument('--outputs', type=Path, required=True)
     parser.add_argument('--backup', type=Path, required=True)
-    parser.add_argument('--only', choices=['way1-baseline','way1-generic','way1-known','scene2-known'])
+    parser.add_argument('--only', choices=['way1-baseline','way1-generic','way1-known','scene2-generic','scene2-known'])
     args = parser.parse_args()
     root = Path(__file__).resolve().parents[1]
     profile = json.loads((root/'configs/truck-scene2-geometry.json').read_text())
@@ -70,8 +70,10 @@ def main():
         ('way1-baseline', args.baseline_code, args.way1, args.way1_weights, 'front', .2, None),
         ('way1-generic', root, args.way1, args.way1_weights, 'front', .2, None),
         ('way1-known', root, args.way1, args.way1_weights, 'front', .2, profile['dimensions_m']),
-        ('scene2-known', root, args.scene2, args.scene2_weights, 'center', .5, profile['dimensions_m']),
+        ('scene2-generic', root, args.scene2, args.scene2_weights, 'center', .5, None),
     ]
+    if args.only == 'scene2-known':
+        cases.append(('scene2-known', root, args.scene2, args.scene2_weights, 'center', .5, profile['dimensions_m']))
     for name, code, data, weights, reference, confidence, dimensions in cases:
         if args.only and args.only != name:
             continue
