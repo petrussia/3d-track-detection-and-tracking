@@ -22,7 +22,7 @@ def main():
     parser.add_argument('--outputs', type=Path, required=True)
     parser.add_argument('--backup', type=Path, required=True)
     parser.add_argument('--confidence', type=float, default=.20)
-    parser.add_argument('--reference', choices=['center', 'front'], default='center')
+    parser.add_argument('--reference', choices=['center', 'front'], default='front')
     parser.add_argument('--shape-dimensions-m', nargs=3, type=float, metavar=('L', 'W', 'H'))
     args = parser.parse_args()
     info = inspect_dataset(args.data)

@@ -16,13 +16,11 @@ from pathlib import Path
 import cv2
 import numpy as np
 
-from .geometry import CameraRig, estimate_measurement
+from .geometry import CameraRig
 from .stream import SequentialVideo, due_frame
 from .tracking import CameraTrack
-from .world import WorldTrack
-from .reference import select_reference, reference_from_center, orient_reference
-from .silhouette import center_observations
-from .inputs import camera_video
+from .inputs import open_camera_capture
+from .scene_geometry import SceneGeometry
 
 
 def initial_state():
@@ -75,6 +73,8 @@ class Engine:
         if not 0 < confidence < 1:
             raise ValueError('Confidence must be between zero and one')
         self.confidence = confidence
+        self.candidate_confidence = min(confidence, .20)
+        self.acquisition_confidence = max(confidence, .45)
         self.detector_factory = detector_factory
         if replay_mode not in {'live', 'batch'}:
             raise ValueError('Replay mode must be live or batch')
@@ -137,10 +137,9 @@ class Engine:
             camera_ids = rig.camera_ids
             metadata = []
             for camera_id in camera_ids:
-                path = camera_video(self.data_dir, camera_id)
-                capture = cv2.VideoCapture(str(path))
+                capture = open_camera_capture(self.data_dir, camera_id, factory=cv2.VideoCapture)
                 if not capture.isOpened():
-                    raise ValueError(f'Cannot open camera video: {path.name}')
+                    raise ValueError(f'Cannot open camera video: {camera_id}')
                 readers.append(SequentialVideo(capture))
                 metadata.append((capture.get(cv2.CAP_PROP_FPS), int(capture.get(cv2.CAP_PROP_FRAME_COUNT)),
                                  int(capture.get(cv2.CAP_PROP_FRAME_WIDTH)), int(capture.get(cv2.CAP_PROP_FRAME_HEIGHT))))
@@ -148,6 +147,8 @@ class Engine:
             if fps <= 0 or any(abs(item[0]-fps) > .01 for item in metadata):
                 raise ValueError('Camera recordings must have equal valid FPS')
             frame_count = min(item[1] for item in metadata)
+            if any(item[1] != frame_count for item in metadata):
+                raise ValueError('Camera recordings must have equal frame counts')
             if frame_count <= 0:
                 raise ValueError('No video frames')
             if any(m[1:] != metadata[0][1:] for m in metadata):
@@ -160,7 +161,7 @@ class Engine:
                 if self.detector_factory is None:
                     from .detector import VehicleDetector
                     self._detector = VehicleDetector(self.model_path,self.device,self.image_size,
-                                                     confidence=self.confidence)
+                                                     confidence=self.candidate_confidence)
                 else:
                     self._detector = self.detector_factory()
             warmup_start = time.perf_counter()
@@ -181,16 +182,18 @@ class Engine:
             trajectory_writer.writeheader()
             config = {'replay_mode': self.replay_mode, 'model': self._detector.name,
                       'weights': self.model_path.name, 'image_size': self.image_size,
-                      'detector_confidence': self.confidence,
+                      'detector_confidence': self.candidate_confidence,
+                      'track_acquisition_confidence': self.acquisition_confidence,
+                      'track_continuation_confidence': .20,
                       'shape_dimensions_m': self.shape_dimensions_m,
                       'source_fps': fps, 'coordinate_units': 'cm',
-                      'reference_point': self.reference, 'algorithm': 'causal_consensus_shape_body_gated_reference_v4',
+                      'reference_point': self.reference, 'algorithm': 'causal_qualified_observations_single_body_v5',
                       'world_max_coast_s': .5, 'world_max_bearing_s': 5.,
                       'world_max_speed_cm_s': 5000., 'world_max_correction_floor_cm': 1000.,
                       'fallback_policy': 'internal_ground_only_until_named_reference_available',
                       'ground_truth_used_for_inference': False}
             (run_dir/'config.json').write_text(json.dumps(config, indent=2), encoding='utf-8')
-            tracks = {i: CameraTrack() for i in camera_ids}
+            tracks = {i: CameraTrack(acquisition_confidence=self.acquisition_confidence) for i in camera_ids}
             if self.recovery_factory is None:
                 from .recovery import ImageEvidence
                 recovery = ImageEvidence(rig)
@@ -201,11 +204,7 @@ class Engine:
                 shape_estimator = ShapeEstimator(rig, dimensions_m=self.shape_dimensions_m)
             else:
                 shape_estimator = self.shape_factory(rig)
-            world_track = WorldTrack()
-            body_track = WorldTrack()
-            previous_body = None
-            previous_timestamp = None
-            last_shape = None
+            geometry = SceneGeometry(rig, shape_estimator, self.reference)
             trail = []
             previous_frame = -1
             skipped = 0
@@ -246,74 +245,8 @@ class Engine:
                                              'occluded':current.get('occluded',False),
                                              'truncated':current.get('truncated',False),
                                              'quality':current.get('quality',{})})
-                dt = timestamp-previous_timestamp if previous_timestamp is not None else 0.
-                center_prior = body_track.predict_position(timestamp)
-                prior_sigma=(math.sqrt(max(0.,float(np.linalg.eigvalsh(body_track.p[:3,:3]).max())))
-                             if body_track.p is not None else 0.)
-                center_views,excluded_centers=center_observations(rig,frame_index,observations,
-                                                                last_shape,center_prior,prior_sigma)
-                raw_center_fix = estimate_measurement(rig, frame_index, center_views,
-                                           prior_cm=center_prior,
-                                           allow_ground=not body_track.depth_prior_active(timestamp))
-                # A ground contact is neither the volume center nor the front
-                # face center. Keep it internal until a body height is known.
-                legacy_fix = (dict(raw_center_fix, reference_point='cuboid_center')
-                              if self.reference == 'center' and raw_center_fix
-                              and raw_center_fix['method'] != 'ground_plane' else None)
-                velocity_hint=None
-                if previous_body and previous_body['velocity_cm_s'] is not None and not previous_body['mode_reset']:
-                    sigma=math.sqrt(max(0.,float(np.linalg.eigvalsh(body_track.p[3:5,3:5]).max())))
-                    if np.linalg.norm(previous_body['velocity_cm_s'][:2]) >= max(100.,3*sigma):
-                        velocity_hint=previous_body['velocity_cm_s']
-                shape_checkpoint = (shape_estimator.geometry_checkpoint()
-                                    if hasattr(shape_estimator, 'geometry_checkpoint') else None)
-                shape = shape_estimator.update(frame_index, timestamp, observations,
-                    prior_cm=center_prior,
-                    velocity_cm_s=velocity_hint)
-                body_fix=(dict(shape) if shape else reference_from_center(raw_center_fix,last_shape,'center')
-                          if last_shape else raw_center_fix)
-                if body_fix:
-                    body_fix=dict(body_fix)
-                    body_fix['reference_point']=('body_contact_proxy' if body_fix['method']=='ground_plane' and not last_shape else 'body_center')
-                body=body_track.update(body_fix,timestamp)
-                reference_model=last_shape
-                if not shape and last_shape and body['state']=='observed' and not body['mode_reset']:
-                    reference_model=orient_reference(last_shape,body['velocity_cm_s'],body_track.p[3:5,3:5],dt)
-                if shape:
-                    fix = select_reference(shape,self.reference)
-                else:
-                    fix = (reference_from_center(raw_center_fix,reference_model,self.reference)
-                           if reference_model is not None else legacy_fix)
-                # A derived reference cannot be accepted before the body pose
-                # it depends on. In particular, an uninitialized front filter
-                # must not bypass the body's ground-to-metric confirmation.
-                blocked_reference = fix if fix is not None and not body['measurement_accepted'] else None
-                world = world_track.update(None if blocked_reference is not None else fix, timestamp)
-                world.update(body_measurement_accepted=body['measurement_accepted'],
-                             body_rejection_reason=body['rejection_reason'],
-                             blocked_reference_measurement=blocked_reference)
-                if shape_checkpoint is not None and (not body['measurement_accepted']
-                        or (fix is not None and not world['measurement_accepted'])):
-                    shape_estimator.restore_geometry(shape_checkpoint)
-                if shape and body['measurement_accepted'] and (fix is None or world['measurement_accepted']):
-                    # Center learning must work before the front sign is known.
-                    last_shape = dict(fix if fix is not None else shape)
-                elif fix and world['measurement_accepted'] and reference_model:
-                    last_shape=dict(reference_model)
-                    last_shape.update(position_cm=fix['position_cm'],center_cm=fix['center_cm'],
-                                      front_cm=fix['front_cm'],reference_point=fix['reference_point'])
-                previous_body=body
-                previous_timestamp=timestamp
-                center = front = None
-                if last_shape and world['position_cm'] is not None:
-                    shift = np.asarray(world['position_cm'])-np.asarray(last_shape['position_cm'])
-                    center = (np.asarray(last_shape['center_cm'])+shift).tolist()
-                    front = ((np.asarray(last_shape['front_cm'])+shift).tolist()
-                             if last_shape.get('front_cm') is not None else None)
-                world.update(object_center_cm=center, front_cm=front,
-                             dimensions_cm=last_shape.get('dimensions_cm') if last_shape else None,
-                             yaw_rad=last_shape.get('yaw_rad') if last_shape else None,
-                             body_center_cm=body['position_cm'],body_velocity_cm_s=body['velocity_cm_s'])
+                world, observations, excluded_centers = geometry.update(frame_index, timestamp, observations)
+                center, front = world['object_center_cm'], world['front_cm']
                 if world['position_cm'] is not None:
                     if world['mode_reset'] and trail:
                         trail.append(None)

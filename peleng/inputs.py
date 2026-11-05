@@ -1,10 +1,37 @@
 """Preflight camera inputs without opening the target's reference trajectory."""
 from pathlib import Path
 import math
+import re
 
 import cv2
 
 from .geometry import CameraRig
+from .segmented_video import SegmentedCapture
+
+
+def camera_video_segments(directory, camera_id):
+    directory=Path(directory)
+    whole=sorted(directory.glob(f'*.FinalImage.CineCameraActor{camera_id}.mp4'))
+    parts=sorted(directory.glob(f'*.FinalImage.CineCameraActor{camera_id}_part*.mp4'))
+    if len(whole)>1 or (whole and parts):
+        raise ValueError(f'Ambiguous camera video {camera_id}')
+    if parts:
+        indexed=[]
+        for path in parts:
+            match=re.search(r'_part(\d+)\.mp4$',path.name)
+            if not match: raise ValueError('Invalid segment number')
+            indexed.append((int(match[1]),path))
+        indexed.sort()
+        if [n for n,_ in indexed] != list(range(1,len(indexed)+1)):
+            raise ValueError('Camera segments must be consecutively numbered from 1')
+        return [path for _,path in indexed]
+    return whole or [directory/f'Way1.FinalImage.CineCameraActor{camera_id}.mp4']
+
+
+def open_camera_capture(directory, camera_id, factory=None):
+    paths=camera_video_segments(directory,camera_id)
+    factory=factory or cv2.VideoCapture
+    return factory(str(paths[0])) if len(paths)==1 else SegmentedCapture(paths,factory)
 
 
 def camera_video(directory, camera_id):
@@ -21,8 +48,9 @@ def inspect_dataset(directory):
     streams = []
     warnings = []
     for camera_id in rig.camera_ids:
-        path = camera_video(directory, camera_id)
-        capture = cv2.VideoCapture(str(path))
+        paths = camera_video_segments(directory, camera_id)
+        path = paths[0]
+        capture = open_camera_capture(directory, camera_id)
         try:
             if not capture.isOpened():
                 raise ValueError(f'Cannot open camera video: {path.name}')
@@ -33,7 +61,9 @@ def inspect_dataset(directory):
             if not math.isfinite(fps) or fps <= 0 or min(count, width, height) <= 0:
                 raise ValueError(f'Invalid video metadata: {path.name}')
             streams.append({'camera_id': camera_id, 'fps': fps, 'frames': count,
-                            'width': width, 'height': height})
+                            'width': width, 'height': height,
+                            'segments': [p.name for p in paths],
+                            'segment_offsets': getattr(capture, 'offsets', [0])})
             poses = rig._cameras[camera_id].frames
             if poses[0] != 0:
                 raise ValueError(f'Camera {camera_id}: no pose at frame 0')
@@ -54,4 +84,5 @@ def inspect_dataset(directory):
             'width': first['width'], 'height': first['height'],
             'duration_s': first['frames']/first['fps'], 'warnings': warnings,
             'synchronization_assumption': 'shared frame zero and equal constant FPS; no measured clock offset',
-            'coordinate_units_assumed': 'UE cm', 'ground_truth_read': False}
+            'coordinate_units_assumed': 'UE cm', 'ground_truth_read': False,
+            'video_streams': streams}

@@ -68,3 +68,17 @@ def test_operating_threshold_counts_duplicate_and_background_boxes():
     assert (low['tp'], low['fp'], low['fn']) == (1, 2, 1)
     assert (high['tp'], high['fp'], high['fn']) == (1, 0, 1)
     assert high['f1'] == pytest.approx(2/3)
+
+
+def test_ignored_examples_are_not_exported_as_background(tmp_path, monkeypatch):
+    def forbidden_capture(_):
+        raise AssertionError('Ignored image must not be decoded or exported')
+    monkeypatch.setattr(adapt.cv2,'VideoCapture',forbidden_capture)
+    annotations=tmp_path/'annotations.json'
+    annotations.write_text(json.dumps(dict(excluded_ambiguous=[[300,3]],images=[
+        dict(frame=300,camera_id=3,split='train',boxes=[]),
+        dict(frame=450,camera_id=4,split='val',boxes=[],ignore=True)])))
+    destination=tmp_path/'dataset'
+    adapt.prepare(tmp_path,annotations,destination)
+    assert not list((destination/'images').rglob('*.jpg'))
+    assert not list((destination/'labels').rglob('*.txt'))

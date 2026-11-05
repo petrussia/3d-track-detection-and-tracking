@@ -17,9 +17,10 @@ def center_observations(rig, frame, observations, model, prior_cm, position_sigm
         partial=(observation.get('occluded') or observation.get('truncated')
                  or (observation.get('quality') or {}).get('partial'))
         clipped=min(box[0],box[1],rig.width-box[2],rig.height-box[3])<=2.
-        if partial or clipped:
+        permitted = observation.get('geometry_eligibility', {}).get('center_bearing', True)
+        if partial or clipped or not permitted:
             rejected.append({'camera_id':observation['camera_id'],
-                             'reason':'explicit_partial' if partial else 'truncated_center'})
+                             'reason':'geometry_ineligible' if not permitted else 'explicit_partial' if partial else 'truncated_center'})
         else:
             eligible.append(observation)
     if not model or prior_cm is None or model.get('dimensions_cm') is None:
