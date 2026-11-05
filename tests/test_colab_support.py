@@ -8,6 +8,14 @@ import zipfile
 from peleng.colab_support import normalize_truth, unpack_bundles, export_metres, score_run
 
 class ColabSupportTests(unittest.TestCase):
+    def test_score_rejects_different_physical_reference_before_reading_truth(self):
+        with tempfile.TemporaryDirectory() as folder:
+            run = Path(folder)
+            (run/'config.json').write_text('{"reference_point":"front"}')
+            # Missing truth is deliberate: reference validation must happen first.
+            with self.assertRaises(ValueError):
+                score_run(run, run/'unread-truth.csv', 100, 'center')
+
     def test_synthetic_metres_convert_once(self):
         with tempfile.TemporaryDirectory() as d:
             d=Path(d);src=d/'truth.csv';dst=d/'normalized.csv'
