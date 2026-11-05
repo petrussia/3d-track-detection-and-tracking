@@ -264,34 +264,31 @@ class ShapeTests(unittest.TestCase):
         self.assertIsNone(ShapeEstimator(self.rig).update(0, 0., observations,
                                                         velocity_cm_s=self.direction * 400))
 
-    def test_sparse_foreground_fragment_is_not_a_full_shape_measurement(self):
-        # A truck-plus-tree component may enclose the target without observing its extent.
+    def test_explicit_fragment_is_not_a_full_shape_measurement(self):
         observations = self.boxes([1000., 500., 400.])
-        observations[0].update(source='foreground', quality={'foreground_fill': .45})
+        observations[0].update(source='foreground', quality={'foreground_fill': .8, 'partial': True})
         self.assertIsNone(ShapeEstimator(self.rig).update(0, 0., observations))
 
-    def test_low_fill_can_update_a_known_pose_without_learning_its_extent(self):
-        # Known scale remains useful while silhouette confidence is reduced by tree occlusion.
+    def test_low_fill_alone_does_not_mean_partial_object(self):
+        # An intact diagonal truck can occupy little of its axis-aligned box.
         estimator = ShapeEstimator(self.rig)
         learned = self.learn(estimator)
         observations = self.boxes([1300., 700., 420.], cameras=(1,))
-        observations[0].update(source='foreground', quality={'foreground_fill': .45})
+        observations[0].update(source='foreground', quality={'foreground_fill': .39})
         result = estimator.update(6, .6, observations, velocity_cm_s=self.direction * 400)
         self.assertIsNotNone(result)
+        self.assertFalse(result['partial_silhouette'])
         self.assertEqual(result['shape_samples'], learned['shape_samples'])
-        self.assertTrue(result['partial_silhouette'])
         np.testing.assert_allclose(result['center_cm'], [1300., 700., 420.], atol=50.)
 
-    def test_known_shape_uses_unclipped_edges_without_treating_border_as_object_edge(self):
-        # Right-image clipping is a one-sided constraint, not a measured rightmost corner.
+    def test_clipped_single_view_does_not_update_depth_or_shape(self):
         estimator = ShapeEstimator(self.rig)
         learned = self.learn(estimator)
         observations = self.boxes([1000., 12000., 400.], cameras=(1,))
         observations[0]['bbox'][2] = 1920.
         result = estimator.update(6, .6, observations, velocity_cm_s=self.direction * 400)
-        self.assertIsNotNone(result)
-        self.assertEqual(result['shape_samples'], learned['shape_samples'])
-        np.testing.assert_allclose(result['center_cm'], [1000., 12000., 400.], atol=70.)
+        self.assertIsNone(result)
+        self.assertEqual(estimator._sample_count, learned['shape_samples'])
 
     def test_containment_only_fragment_has_no_metric_range_measurement(self):
         # All four satisfied inequalities carry no local position information.
@@ -356,20 +353,14 @@ class ShapeTests(unittest.TestCase):
         self.assertGreaterEqual(result['uncertainty_m'], learned['dimension_sigma_cm'][0]/200)
         self.assertGreater(np.linalg.eigvalsh(learned['systematic_covariance_cm2']).min(), 0.)
 
-    def test_held_heading_uncertainty_is_a_persistent_front_offset_floor(self):
-        # A held axis is a shared assumption, so repeat pixels cannot remove its lateral error.
+    def test_dense_fragment_does_not_become_full_depth_even_with_known_size(self):
         estimator = ShapeEstimator(self.rig)
         self.learn(estimator)
         observations = self.boxes([1300., 700., 420.], cameras=(1,))
-        observations[0].update(source='foreground', quality={'foreground_fill': .45})
-        result = estimator.update(6, .6, observations, velocity_cm_s=self.direction*400)
-        self.assertIsNotNone(result)
-        systematic = result.get('front_systematic_covariance_cm2')
-        self.assertIsNotNone(systematic, 'Held orientation needs a persistent uncertainty floor')
-        side = np.array([-math.sin(result['yaw_rad']), math.cos(result['yaw_rad']), 0.])
-        extra = np.asarray(systematic)-np.asarray(result['systematic_covariance_cm2'])
-        expected = (result['dimensions_cm'][0]/2*result['yaw_sigma_rad'])**2
-        self.assertGreaterEqual(float(side @ extra @ side), expected*.999)
+        observations[0].update(quality={'foreground_fill': .95},
+            geometry_eligibility={'depth': False, 'shape': False})
+        self.assertIsNone(estimator.update(6, .6, observations,
+            prior_cm=[1300., 700., 420.], velocity_cm_s=self.direction*400))
 
     def test_one_inconsistent_view_does_not_destroy_two_good_views(self):
         # A partial box in a third camera must not poison the geometrically consistent pair.
@@ -382,16 +373,13 @@ class ShapeTests(unittest.TestCase):
         np.testing.assert_allclose(result['center_cm'], [1000., 500., 400.], atol=15.)
 
     def test_partial_only_view_cannot_turn_occlusion_into_a_new_heading(self):
-        # Silhouette changes behind a tree must not rotate the front reference point.
         estimator = ShapeEstimator(self.rig)
         learned = self.learn(estimator)
         observations = self.boxes([1300., 700., 420.], yaw=self.yaw+.2, cameras=(1,))
-        observations[0].update(source='foreground', quality={'foreground_fill': .45})
+        observations[0].update(source='foreground', quality={'partial': True, 'foreground_fill': .8})
         result = estimator.update(6, .6, observations, velocity_cm_s=[0., 400., 0.])
-        self.assertIsNotNone(result)
-        self.assertAlmostEqual(result['yaw_rad'], learned['yaw_rad'], delta=.001)
-        self.assertTrue(result['orientation_held'])
-        self.assertGreaterEqual(result['yaw_sigma_rad'], learned['yaw_sigma_rad'])
+        self.assertIsNone(result)
+        self.assertAlmostEqual(estimator._yaw, learned['yaw_rad'], delta=.001)
 
     def test_rejected_pose_does_not_change_the_learned_shape(self):
         # A rejected final shared-shape fit must not commit its tentative size sample.

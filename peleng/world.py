@@ -181,8 +181,13 @@ class WorldTrack:
                             and measurement.get('method') == 'triangulated'
                             and len(set(measurement.get('cameras', []))) >= 2
                             and independent_depth)
+        qualified_triangulation = (measurement is not None
+            and measurement.get('method') == 'triangulated'
+            and measurement.get('reacquisition_qualified', False)
+            and len(set(measurement.get('cameras', []))) >= 2
+            and independent_depth)
         reacquisition_reason = None
-        if not accepted and (independent or ground_to_metric):
+        if not accepted and (independent or ground_to_metric or qualified_triangulation):
             candidate = {'time':timestamp,'point':point.copy(),'covariance':covariance,
                          'reference':measurement.get('reference_point',self.reference_point)}
             if self._metric_candidates:
@@ -203,8 +208,9 @@ class WorldTrack:
                 self.segment_id+=1
                 accepted=reinitialized=True
                 reason=None
-                reacquisition_reason=('consistent_multiview_pose' if independent
-                                      else 'consistent_triangulation_from_ground')
+                reacquisition_reason=('consistent_multiview_pose' if independent else
+                    'consistent_qualified_triangulation' if qualified_triangulation else
+                    'consistent_triangulation_from_ground')
                 reset_reason = reacquisition_reason
                 self._metric_candidates=[]
         elif accepted and not bearing:

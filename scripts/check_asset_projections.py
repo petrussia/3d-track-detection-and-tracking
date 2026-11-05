@@ -15,7 +15,7 @@ from scipy.spatial import ConvexHull
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from peleng.geometry import CameraRig
-from peleng.inputs import camera_video
+from peleng.inputs import open_camera_capture
 from peleng.shape import ShapeEstimator, _axes
 
 
@@ -83,7 +83,7 @@ def check(data, annotations, asset, output):
         results.append(result)
         tiles = []
         for index, view in enumerate(views):
-            capture = cv2.VideoCapture(str(camera_video(data, view['camera_id'])))
+            capture = open_camera_capture(data, view['camera_id'])
             capture.set(cv2.CAP_PROP_POS_FRAMES, frame)
             ok, image = capture.read()
             capture.release()

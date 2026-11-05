@@ -113,7 +113,8 @@ class ShapeEstimator:
                                     y1 <= margin, y2 >= self.rig.height-margin])
                 explicit_partial = bool(observation.get('occluded') or observation.get('truncated')
                                         or quality.get('partial'))
-                partial = bool(clipped.any() or explicit_partial or fill < .6)
+                permitted = observation.get('geometry_eligibility', {}).get('depth', True)
+                partial = bool(clipped.any() or explicit_partial or not permitted)
                 if explicit_partial:
                     clipped[:] = True
                 camera, origin, rotation = self.rig._pose(camera_id, frame)
@@ -134,7 +135,8 @@ class ShapeEstimator:
                             direction=direction, box=box, edges=box[[0, 2, 1, 3]],
                             fx=camera.fx, fy=camera.fy, normals=normals, norms=norms,
                             sigma=sigma, confidence=confidence, clipped=clipped,
-                            partial=partial, learnable=not partial)
+                            partial=partial, learnable=not partial,
+                            geometry_permitted=permitted)
                 if camera_id not in selected or confidence > selected[camera_id]['confidence']:
                     selected[camera_id] = view
             except (KeyError, TypeError, ValueError, OverflowError):
@@ -453,6 +455,37 @@ class ShapeEstimator:
         _, fit, support = min(alternatives, key=lambda item: item[0])
         return fit, support
 
+    def _validate_available_views(self, fit, views):
+        """Validate any hypothesis, including a single-view fallback.
+
+        Complete boxes constrain four edges. A fragment only has to lie inside
+        the projected full volume; its centre and size are not full-body data.
+        Two agreeing complete views may outvote one bad view. One view cannot
+        override a contradictory fresh high-confidence observation.
+        """
+        complete_support, rejected, residuals = [], [], {}
+        for view in views:
+            projected = self._project(fit['center'], fit['yaw'], fit['dimensions'], [view])
+            if projected is None:
+                residual = np.full(4, np.inf)
+            elif view['partial']:
+                residual = np.maximum((projected-view['edges'])*[1.,-1.,1.,-1.], 0.) / view['sigma']
+            else:
+                residual = (projected-view['edges'])/view['sigma']
+            rms = float(np.sqrt(np.mean(residual**2)))
+            residuals[view['camera_id']] = rms if math.isfinite(rms) else None
+            reliable = view['confidence'] >= .45
+            supported = rms <= 2.5 and np.max(np.abs(residual)) <= 4.
+            if reliable and not supported:
+                rejected.append(view['camera_id'])
+            elif reliable and supported and not view['partial']:
+                complete_support.append(view['camera_id'])
+        fit['consensus'] = dict(evaluated_cameras=[v['camera_id'] for v in views],
+            supporting_cameras=complete_support, rejected_cameras=rejected,
+            normalized_rms_by_camera=residuals,
+            partial_constraint='projected_full_volume_contains_visible_fragment')
+        return not rejected or (len(complete_support) >= 2 and len(complete_support) > len(rejected))
+
     def _learn(self, fit):
         dimensions = fit['dimensions']
         variance = np.maximum(np.diag(fit['covariance'])[4:], (.025*dimensions)**2)
@@ -498,8 +531,23 @@ class ShapeEstimator:
         all_views = self._views(frame_index, observations)
         if not all_views:
             return None
+        checkpoint = self.geometry_checkpoint()
+        if prior is not None and self._dimensions is not None and self._yaw is not None:
+            for view in all_views:
+                projected = self._project(prior, self._yaw, self._dimensions, [view])
+                if projected is None:
+                    continue
+                expected = projected[[1, 3]]-projected[[0, 2]]
+                actual = view['edges'][[1, 3]]-view['edges'][[0, 2]]
+                inside = np.all((projected-view['edges'])*[1.,-1.,1.,-1.] <= 3*view['sigma'])
+                if min(expected) >= 10 and inside and min(actual/expected) < .45:
+                    view.update(partial=True, learnable=False, geometry_permitted=False)
+                    view['clipped'][:] = True
         full_views = [view for view in all_views if view['learnable']]
-        views = full_views if len(full_views) >= 2 else all_views
+        # An untrusted fragment cannot initialize range from the full truck size.
+        if not full_views:
+            return None
+        views = full_views
         seed = self._seed(views)
         # The all-view ray seed may include a partial box that the robust fitter
         # will later reject. It cannot establish body motion or the front sign.
@@ -532,6 +580,8 @@ class ShapeEstimator:
                 candidate = self._fit([view], start, heading, shared=self._dimensions, fixed=True)
                 if candidate is None or not range_consistent(candidate, view):
                     continue
+                if not self._validate_available_views(candidate, all_views):
+                    continue
                 scale = max(3., .1*np.linalg.norm(prior-view['origin']), 15.*elapsed)
                 score = candidate['normalized_rms']**2 + np.sum((candidate['center']-prior)**2)/scale**2
                 alternatives.append((score, candidate, [view]))
@@ -547,6 +597,8 @@ class ShapeEstimator:
             if fit is None:
                 fit, views = single_view_fallback(full_views)
             if fit is None:
+                return None
+            if not self._validate_available_views(fit, all_views):
                 return None
             previous_learning = (self._samples.copy(), self._sample_count,
                                  None if self._dimensions is None else self._dimensions.copy(),
@@ -580,6 +632,9 @@ class ShapeEstimator:
         else:
             return None
         if fit is None:
+            return None
+        if not self._validate_available_views(fit, all_views):
+            self.restore_geometry(checkpoint)
             return None
         views = [view for view in views if view['camera_id'] in fit['active_camera_ids']]
         metric_views = [view for view in views if view['camera_id'] in fit['metric_camera_ids']]

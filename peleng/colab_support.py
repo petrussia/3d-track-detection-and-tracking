@@ -81,6 +81,9 @@ def score_run(run_dir, truth_path, expected_frames, truth_reference):
     from .evaluate import _evaluate, _write_errors
     from .report import write_report
     run_dir = Path(run_dir)
+    config = json.loads((run_dir/'config.json').read_text())
+    if truth_reference in {'center', 'front'} and config['reference_point'] != truth_reference:
+        raise ValueError('Reference mismatch: explicitly transform the ground-truth point using body pose before scoring')
     truth = normalize_truth(truth_path, run_dir/'evaluation_reference.csv')
     result, points = _evaluate(run_dir, truth)
     # Do not count the extra organizer CSV row beyond the end of the video.

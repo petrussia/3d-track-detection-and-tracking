@@ -56,6 +56,61 @@ def orient_reference(model, velocity_cm_s, velocity_covariance, dt):
     return result
 
 
+def reference_from_body_state(body, covariance_cm2, model, reference, model_age_s=0.):
+    """Derive the output point from ONE accepted state; never filter it again.
+
+The body filter owns timeouts, acceptance and reacquisition. Model uncertainty
+is retained when translating its position to the cab. No model means no front.
+"""
+    if reference not in {'front', 'center'}:
+        raise ValueError('Reference must be front or center')
+    result = dict(body)
+    result.update(reference_point=None, object_center_cm=None, front_cm=None,
+                  body_measurement_accepted=body['measurement_accepted'],
+                  body_rejection_reason=body.get('rejection_reason'),
+                  body_raw_measurement=body.get('raw_measurement'),
+                  reference_state_source='derived_from_body')
+    metric_body = body.get('reference_point') in {'body_center', 'cuboid_center'}
+    if body.get('position_cm') is None or not metric_body:
+        result.update(state='lost', position_cm=None, velocity_cm_s=None,
+                      measurement_accepted=False, method=None, raw_measurement=None)
+        return result
+    result['object_center_cm'] = list(body['position_cm'])
+    if model:
+        model = dict(model, yaw_sigma_rad=math.hypot(float(model.get('yaw_sigma_rad', .2)),
+                                                    .35*max(0., model_age_s)))
+    measurement = dict(position_cm=body['position_cm'], method=body['method'],
+                       covariance_cm2=np.asarray(covariance_cm2).tolist())
+    # A bearing has already updated the body here; this is a translation of
+    # posterior coordinates, not a second bearing observation.
+    measurement['method'] = 'body_posterior'
+    mapped = reference_from_center(measurement, model, reference) if model else None
+    if reference == 'center' and mapped is None:
+        mapped = dict(position_cm=body['position_cm'], center_cm=body['position_cm'],
+                      front_cm=None, reference_point='cuboid_center',
+                      covariance_cm2=np.asarray(covariance_cm2).tolist())
+    if mapped is None:
+        result.update(state='lost', position_cm=None, velocity_cm_s=None,
+                      method=None, measurement_accepted=False, raw_measurement=None,
+                      reference_unavailable_reason='front_orientation_unobservable')
+        return result
+    result.update(position_cm=mapped['position_cm'], front_cm=mapped['front_cm'],
+                  reference_point=mapped['reference_point'],
+                  uncertainty_m=math.sqrt(max(0., float(np.linalg.eigvalsh(
+                      mapped['covariance_cm2']).max())))/100.)
+    if result.get('predicted_position_cm') is not None:
+        offset = np.asarray(mapped['position_cm']) - np.asarray(body['position_cm'])
+        result['predicted_position_cm'] = (np.asarray(result['predicted_position_cm'])+offset).tolist()
+    # Translational body velocity alone is not the velocity of a rotating cab.
+    if reference == 'front':
+        result['velocity_cm_s'] = None
+        result['velocity_unavailable_reason'] = 'cab_angular_velocity_not_observed'
+    raw = body.get('raw_measurement')
+    result['raw_measurement'] = (reference_from_center(raw, model, reference)
+                                 if raw and model else raw if reference == 'center' else None)
+    return result
+
+
 def select_reference(shape, reference):
     if reference not in {'front', 'center'}:
         raise ValueError('Reference must be front or center')

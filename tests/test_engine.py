@@ -83,7 +83,7 @@ class EngineTests(unittest.TestCase):
             with patch('peleng.engine.time.perf_counter', clock.read), \
                     patch('peleng.engine.cv2.VideoCapture', Capture), \
                     patch('peleng.engine.cv2.imwrite', return_value=True), \
-                    patch('peleng.engine.estimate_measurement', return_value=ground):
+                    patch('peleng.scene_geometry.estimate_measurement', return_value=ground):
                 engine._run()
             state = engine.snapshot()
             self.assertEqual(state['status'], 'finished', state['message'])
@@ -161,7 +161,8 @@ class EngineTests(unittest.TestCase):
             state=engine.snapshot()
             self.assertEqual(state['status'],'finished',state['message'])
             records=[json.loads(s) for s in (Path(state['summary']['run_dir'])/'observations.jsonl').read_text().splitlines()]
-            self.assertFalse(records[1]['world']['measurement_accepted'])
+            self.assertEqual(records[1]['world']['shape_rejection_reason'],
+                             'implausible_front_orientation_change')
             self.assertEqual(records[2]['world']['object_center_cm'],[1000.,0.,100.])
 
     def test_current_image_evidence_reaches_shape_without_counting_as_neural(self):

@@ -59,7 +59,7 @@ DATASET = 'organizer' # @param ['organizer','Peleng-01-valley','Peleng-02-occlus
 MODEL = 'yolo11s.pt' # @param ['yolo11n.pt','yolo11s.pt','yolo11m.pt','custom']
 CUSTOM_WEIGHTS = '' # @param {type:'string'}
 IMAGE_SIZE = 960 # @param [640,960,1280] {type:'raw'}
-REFERENCE = 'center' # @param ['center','front']
+REFERENCE = 'front' # @param ['front','center']
 assert DATASET in DATASETS
 if MODEL == 'custom':
     WEIGHTS=Path(CUSTOM_WEIGHTS)
@@ -76,6 +76,8 @@ else:
 from peleng.inputs import inspect_dataset
 print(json.dumps(inspect_dataset(DATASETS[DATASET]['videos']),indent=2,ensure_ascii=False))
 print('Целевая точка:',REFERENCE,'; эталон:',DATASETS[DATASET]['truth_reference'])
+if DATASETS[DATASET]['truth_reference']=='center' and REFERENCE!='center':
+    print('Эталон синтетики описывает центр. Для оценки нужен явный перевод точки по позе; прямое сравнение с передом кабины запрещено.')
 ''')
 code('''# @title 4. Запустить обработку и просмотр камер
 from peleng.colab_support import run_notebook

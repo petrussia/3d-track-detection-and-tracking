@@ -6,13 +6,18 @@ import json
 from pathlib import Path
 import random
 import shutil
+import sys
 
 import cv2
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from peleng.inputs import open_camera_capture
 
 
 def prepare(source, annotations, destination):
     manifest = json.loads(Path(annotations).read_text(encoding='utf-8'))
-    rows = manifest['images']
+    excluded = {tuple(item) for item in manifest.get('excluded_ambiguous', [])}
+    rows = [row for row in manifest['images']
+            if (row['frame'], row['camera_id']) not in excluded and not row.get('ignore', False)]
     seen, groups = set(), {}
     for row in rows:
         if row['split'] not in {'train', 'val', 'test'}:
@@ -28,7 +33,8 @@ def prepare(source, annotations, destination):
             if not (0 <= x1 < x2 <= 1920 and 0 <= y1 < y2 <= 1080):
                 raise ValueError('Invalid annotation')
     destination = Path(destination)
-    if (destination/'dataset.yaml').exists(): raise ValueError('Use a new destination to avoid stale labels')
+    if destination.exists() and any(destination.iterdir()):
+        raise ValueError('Use a new destination to avoid stale labels')
     for split in ('train', 'val', 'test'):
         for kind in ('images', 'labels'): (destination/kind/split).mkdir(parents=True, exist_ok=True)
 
@@ -40,7 +46,7 @@ def prepare(source, annotations, destination):
 
     rng = random.Random(42)
     for index, row in enumerate(rows):
-        cap = cv2.VideoCapture(str(Path(source)/f"Way2.FinalImage.CineCameraActor{row['camera_id']}.mp4"))
+        cap = open_camera_capture(source,row['camera_id'],factory=cv2.VideoCapture)
         cap.set(cv2.CAP_PROP_POS_FRAMES, row['frame'])
         ok, im = cap.read(); cap.release()
         if not ok or im.shape[:2] != (1080, 1920): raise ValueError('Missing or wrong-size frame')
