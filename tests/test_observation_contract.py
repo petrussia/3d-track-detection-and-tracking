@@ -6,6 +6,22 @@ from peleng.reference import reference_from_body_state
 from peleng.world import WorldTrack
 
 
+def test_box_center_triangulation_without_shape_is_not_exported_as_body_center(monkeypatch):
+    from types import SimpleNamespace
+    import peleng.scene_geometry as module
+    raw=dict(position_cm=[1000.,0.,400.],method='triangulated',cameras=[1,2],
+             covariance_cm2=(np.eye(3)*10000).tolist(),ray_angle_deg=45.,
+             reprojection_max_px=0.,uncertainty_m=1.)
+    monkeypatch.setattr(module,'estimate_measurement',lambda *a,**k:dict(raw))
+    shape=SimpleNamespace(update=lambda *a,**k:None)
+    pipeline=module.SceneGeometry(SimpleNamespace(width=1920,height=1080),shape,'center')
+    world,_,_=pipeline.update(0,0.,[box([100,100,500,300])])
+    assert world['position_cm'] is None and world['object_center_cm'] is None
+    assert world['body_center_cm'] is None
+    assert world['internal_body_reference']=='visual_box_center_proxy'
+    assert not world['untyped_center_candidate']['reacquisition_qualified']
+
+
 def box(bounds, confidence=.8, **extra):
     return dict(camera_id=1,bbox=bounds,confidence=confidence,source='neural',**extra)
 

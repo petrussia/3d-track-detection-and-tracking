@@ -705,8 +705,11 @@ class ShapeEstimator:
             'dimension_sample_accepted': dimension_sample_accepted,
             'shared_dimensions_cm': (self._dimensions*100).tolist(),
             'dimensions_learned': self._known_dimensions is not None or self._sample_count >= 3,
-            'dimension_source': 'configured_asset_geometry' if self._known_dimensions is not None else 'causal_multiview_learning',
-            'dimension_sigma_cm': (np.sqrt(self._dimension_variance)*100).tolist(),
+            'dimension_source': ('current_multiview_fit' if not fit['fixed'] else
+                'configured_asset_geometry' if self._known_dimensions is not None else 'causal_multiview_learning'),
+            'dimension_sigma_cm': (np.sqrt(np.maximum(0.,np.diag(covariance)[4:]))*100).tolist()
+                if not fit['fixed'] else (np.sqrt(self._dimension_variance)*100).tolist(),
+            'shared_dimension_sigma_cm': (np.sqrt(self._dimension_variance)*100).tolist(),
             'provisional_scale': self._known_dimensions is None and self._sample_count < 3, 'scale_usable': True,
             'partial_silhouette': partial,
             'shape_samples': self._sample_count, 'fit_rms_px': fit['rms'], 'fit_max_px': fit['maximum'],

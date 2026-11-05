@@ -55,7 +55,7 @@ class ColabSupportTests(unittest.TestCase):
             d=Path(d);truth=d/'truth.csv'
             truth.write_text('Frame;Loc_X;Loc_Y;Loc_Z\n0;0;0;0\n1;0;0;0\n2;0;0;0\n')
             (d/'config.json').write_text('{"reference_point":"center"}')
-            (d/'observations.jsonl').write_text('\n'.join(json.dumps({'source_frame':i,'world':{'state':'observed' if i==0 else 'lost','position_cm':[0,0,0] if i==0 else None}}) for i in [0,1]))
+            (d/'observations.jsonl').write_text('\n'.join(json.dumps({'source_frame':i,'world':{'state':'observed' if i==0 else 'lost','position_cm':[0,0,0] if i==0 else None,'reference_point':'cuboid_center'}}) for i in [0,1]))
             scores=score_run(d,truth,2,'center')
             self.assertEqual(scores['valid_reference_video_frames'],2)
             self.assertEqual(scores['thresholds'][0]['pct_of_valid_reference_frames'],50)

@@ -187,7 +187,7 @@ class Engine:
                       'track_continuation_confidence': .20,
                       'shape_dimensions_m': self.shape_dimensions_m,
                       'source_fps': fps, 'coordinate_units': 'cm',
-                      'reference_point': self.reference, 'algorithm': 'causal_qualified_observations_single_body_v5',
+                      'reference_point': self.reference, 'algorithm': 'independent_multiview_pose_named_reference_v6e',
                       'world_max_coast_s': .5, 'world_max_bearing_s': 5.,
                       'world_max_speed_cm_s': 5000., 'world_max_correction_floor_cm': 1000.,
                       'fallback_policy': 'internal_ground_only_until_named_reference_available',
@@ -211,6 +211,7 @@ class Engine:
             start = time.perf_counter()
             latest_montage = None
             snapshot_at = 0
+            storage_seconds = 0.
             while not self._stop.is_set():
                 elapsed = time.perf_counter()-start
                 if ((self.replay_mode == 'live' and elapsed >= duration)
@@ -227,10 +228,13 @@ class Engine:
                     raise RuntimeError(f'Decoding failed at source frame {frame_index}')
                 frames = [image for _,image in decoded]
                 timestamp = frame_index/fps
+                decoded_at = time.perf_counter()
                 candidates = self._detector.predict(frames)
+                detected_at = time.perf_counter()
                 if len(candidates) != len(camera_ids):
                     raise RuntimeError('Detector returned an unexpected camera count')
                 candidates = recovery.update(frames, camera_ids, frame_index, timestamp, candidates)
+                recovered_at = time.perf_counter()
                 states = []
                 observations = []
                 jpeg_images = {}
@@ -245,7 +249,9 @@ class Engine:
                                              'occluded':current.get('occluded',False),
                                              'truncated':current.get('truncated',False),
                                              'quality':current.get('quality',{})})
+                tracked_at = time.perf_counter()
                 world, observations, excluded_centers = geometry.update(frame_index, timestamp, observations)
+                geometry_at = time.perf_counter()
                 center, front = world['object_center_cm'], world['front_cm']
                 if world['position_cm'] is not None:
                     if world['mode_reset'] and trail:
@@ -281,6 +287,12 @@ class Engine:
                               'published_at_s':finished-start if self.replay_mode == 'live' else None,
                               'replay_mode':self.replay_mode,
                               'latency_ms':age_ms,'processing_ms':processing_ms,
+                              'stage_ms': dict(decode=(decoded_at-step_start)*1000,
+                                  detector=(detected_at-decoded_at)*1000,
+                                  recovery=(recovered_at-detected_at)*1000,
+                                  tracking=(tracked_at-recovered_at)*1000,
+                                  geometry=(geometry_at-tracked_at)*1000,
+                                  visualization=(finished-geometry_at)*1000),
                               'excluded_center_observations':excluded_centers,
                               'camera_observations':observations,'cameras':states,'world':world}
                     metrics.append(metric)
@@ -292,6 +304,7 @@ class Engine:
                                        cameras=states,track=world)
                 # Saving evidence cannot delay publication of this result. Storage
                 # stalls still affect the next frame's cadence/skipped-frame count.
+                storage_started = time.perf_counter()
                 trace.write(json.dumps(metric,ensure_ascii=False,allow_nan=False)+'\n')
                 position = world['position_cm'] or ['', '', '']
                 trajectory_writer.writerow({'Frame': frame_index, 'Time_s': timestamp,
@@ -306,6 +319,7 @@ class Engine:
                     cv2.imwrite(str(run_dir/f'preview-{int(snapshot_at):02d}s.jpg'),latest_montage)
                     snapshot_at += 10
                 previous_frame = frame_index
+                storage_seconds += time.perf_counter()-storage_started
             wall_s = time.perf_counter()-start
             status = 'stopped' if self._stop.is_set() else 'finished'
             available_count = (min(frame_count,int(wall_s*fps)+1) if self.replay_mode == 'live'
@@ -314,6 +328,12 @@ class Engine:
             latencies = [m['latency_ms'] for m in metrics if m['latency_ms'] is not None]
             processing = [m['processing_ms'] for m in metrics]
             summary = {'status':status,'replay_mode':self.replay_mode,'source_fps':fps,
+                       'stage_timing': {stage:dict(total_s=sum(m['stage_ms'][stage] for m in metrics)/1000,
+                           p50_ms=float(np.percentile([m['stage_ms'][stage] for m in metrics],50)),
+                           p95_ms=float(np.percentile([m['stage_ms'][stage] for m in metrics],95)))
+                           for stage in ['decode','detector','recovery','tracking','geometry','visualization'] if metrics},
+                       'storage_total_s':storage_seconds,
+                       'timing_definition':'Host elapsed times; detector includes transfers and result materialization, not isolated GPU kernel time. Buffered trace/CSV writes and periodic previews counted in storage; final report and Drive backup excluded.',
                        'source_frames_per_camera':frame_count,
                        'source_duration_s':duration,'wall_duration_s':wall_s,
                        'warmup_s':warmup_s,'processed_steps':len(metrics),

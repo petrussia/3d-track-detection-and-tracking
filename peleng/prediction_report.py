@@ -5,26 +5,31 @@ import json
 import math
 from collections import Counter
 from pathlib import Path
+from .scoring_contract import matches_reference, coverage_contract
 
 
 def write_prediction_report(run_dir, expected_frames):
     run_dir = Path(run_dir)
     with (run_dir / 'trajectory_m.csv').open(encoding='utf-8') as stream:
         rows = list(csv.DictReader(stream))
+    config_path = run_dir/'config.json'
+    config = json.loads(config_path.read_text(encoding='utf-8')) if config_path.exists() else {}
+    reference = config.get('reference_point') or ('front' if any(
+        r['reference_point']=='front_face_center' for r in rows) else 'center')
+    if len({int(r['Frame']) for r in rows}) != len(rows):
+        raise ValueError('Duplicate source frames in trajectory')
+    rows = [r for r in rows if 0 <= int(r['Frame']) < expected_frames]
     points = []
     for row in rows:
         xyz = [float(row[k + '_m']) if row[k + '_m'] else None for k in 'XYZ']
-        valid = all(v is not None and math.isfinite(v) for v in xyz)
+        valid = (all(v is not None and math.isfinite(v) for v in xyz)
+                 and matches_reference(reference, row.get('reference_point'), row['state']))
         points.append((int(row['Frame']), float(row['Time_s']), xyz if valid else None))
     valid = sum(p[2] is not None for p in points)
     steps = [math.dist(a[2], b[2]) for a, b in zip(points, points[1:])
              if a[2] is not None and b[2] is not None and b[0] == a[0] + 1]
     summary_path = run_dir / 'summary.json'
     summary = json.loads(summary_path.read_text(encoding='utf-8')) if summary_path.exists() else {}
-    config_path = run_dir/'config.json'
-    config = json.loads(config_path.read_text(encoding='utf-8')) if config_path.exists() else {}
-    reference = config.get('reference_point') or ('front' if any(
-        r['reference_point']=='front_face_center' for r in rows) else 'center')
     reference_label = 'переда кабины грузовика' if reference=='front' else 'центра грузовика'
     diagnostics = {'ground_truth_available': False, 'accuracy': None,
                    'expected_frames': expected_frames, 'processed_frames': len(rows),
@@ -38,6 +43,8 @@ def write_prediction_report(run_dir, expected_frames):
                    'detection_frames': summary.get('steps_with_detection'),
                    'multiview_metric_frames': summary.get('metric_triangulation_steps'),
                    'detections_by_camera': summary.get('detections_by_camera')}
+    diagnostics.update(coverage_contract([f for f,t,p in points if p is not None],
+        expected_frames, reference, summary.get('source_fps', 30.)))
     (run_dir / 'diagnostics.json').write_text(json.dumps(diagnostics, ensure_ascii=False, indent=2, allow_nan=False), encoding='utf-8')
 
     def chart(axis):

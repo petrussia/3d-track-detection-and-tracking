@@ -166,7 +166,11 @@ class WorldTrack:
                 reason = 'innovation_gate'
         elif measurement is not None:
             reason = 'depth_prior_expired' if depth_expired else 'bearing_has_no_metric_initialization'
+        queue_events = []
+        queue_size_before = len(self._metric_candidates)
         self._metric_candidates = [c for c in self._metric_candidates if timestamp-c['time'] <= .5]
+        if len(self._metric_candidates) < queue_size_before:
+            queue_events.append('expired_samples')
         # Reliable full-volume poses can recover a depth prior that accepted
         # bearings kept alive. Epipolar ray agreement alone is not enough.
         independent = (measurement is not None and measurement.get('method') == 'cuboid_multiview'
@@ -189,6 +193,7 @@ class WorldTrack:
         reacquisition_reason = None
         if not accepted and (independent or ground_to_metric or qualified_triangulation):
             candidate = {'time':timestamp,'point':point.copy(),'covariance':covariance,
+                         'source_frame':measurement.get('source_frame'),
                          'reference':measurement.get('reference_point',self.reference_point)}
             if self._metric_candidates:
                 previous=self._metric_candidates[-1]
@@ -197,7 +202,9 @@ class WorldTrack:
                 if (delta<=0 or previous['reference']!=candidate['reference'] or
                         np.linalg.norm(point-previous['point']) > 5000.*delta+3.*noise):
                     self._metric_candidates=[]
+                    queue_events.append('inconsistent_with_previous_candidate')
             self._metric_candidates.append(candidate)
+            queue_events.append('candidate_added')
             self._metric_candidates=self._metric_candidates[-8:]
             if len(self._metric_candidates)>=3 and timestamp-self._metric_candidates[0]['time'] >= .08:
                 self.x=np.r_[point,np.zeros(3)]
@@ -213,8 +220,10 @@ class WorldTrack:
                     'consistent_triangulation_from_ground')
                 reset_reason = reacquisition_reason
                 self._metric_candidates=[]
+                queue_events.append('confirmed_and_cleared')
         elif accepted and not bearing:
             self._metric_candidates=[]
+            queue_events.append('accepted_measurement_cleared_queue')
         if accepted:
             self.last_seen = timestamp
             self.last_method = measurement['method']
@@ -253,5 +262,9 @@ class WorldTrack:
                 'measurement_accepted': accepted, 'raw_measurement': raw_measurement,
                 'rejection_reason': reason, 'reinitialized': reinitialized,
                 'reacquisition_reason':reacquisition_reason,
+                'reacquisition_queue':dict(events=queue_events,
+                    candidates=[dict(time_s=c['time'],source_frame=c.get('source_frame')) for c in self._metric_candidates],
+                    eligible_geometry=bool(independent or ground_to_metric or qualified_triangulation),
+                    minimum_count=3,minimum_span_s=.08,maximum_age_s=.5),
                 'metric_depth_observed': bool(accepted and not bearing and
                     measurement.get('metric_depth_observed', measurement['method'] == 'triangulated'))}

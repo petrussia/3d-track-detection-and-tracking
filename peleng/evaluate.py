@@ -118,6 +118,8 @@ def _read_run(run_dir):
             if isinstance(segment, bool) or not isinstance(segment, int) or segment < 0:
                 segment = None
             records[frame] = {'frame': frame, 'state': state, 'position_cm': position,
+                              'reference_point': world.get('reference_point'),
+                              'covariance_cm2': world.get('covariance_cm2'),
                               'method': method if isinstance(method, str) else 'unknown',
                               'mode': mode if isinstance(mode, str) else 'unknown',
                               'segment_id': segment, 'mode_reset': world.get('mode_reset') is True,
@@ -235,8 +237,14 @@ def _group_metrics(records, truth, field):
     return groups
 
 
-def _analyse(run_dir, truth):
+def _analyse(run_dir, truth, reference=None, expected_frames=None):
     records, fps, invalid_rows, invalid_estimates = _read_run(run_dir)
+    if expected_frames is not None:
+        records = {f:r for f,r in records.items() if 0 <= f < expected_frames}
+    if reference is not None:
+        from .scoring_contract import matches_reference
+        records = {f:dict(r, position_cm=r['position_cm'] if matches_reference(
+            reference, r['reference_point'], r['state']) else None) for f,r in records.items()}
     counts = Counter(r['state'] for r in records.values())
     available = [r for r in records.values() if r['position_cm'] is not None]
     observed = _metrics(_errors(records, truth, {'observed'}))
@@ -336,12 +344,22 @@ def _paired(current, baseline, truth, states):
             'baseline': _metrics(_errors(baseline, truth, states, frames))}
 
 
-def _evaluate(run_dir, truth_path, baseline_run=None):
+def _evaluate(run_dir, truth_path, baseline_run=None, *, reference=None, expected_frames=None):
     truth, invalid_frames, invalid_rows = _read_truth(truth_path)
-    result, points, records = _analyse(run_dir, truth)
+    if expected_frames is not None:
+        truth = {f:p for f,p in truth.items() if 0 <= f < expected_frames}
+    result, points, records = _analyse(run_dir, truth, reference, expected_frames)
     result.update(invalid_truth_frames=invalid_frames, invalid_truth_rows=invalid_rows)
+    if reference is not None:
+        from .scoring_contract import coverage_contract
+        count = expected_frames if expected_frames is not None else max(records, default=-1)+1
+        result.update(coverage_contract([f for f,r in records.items() if r['position_cm'] is not None],
+                                       count, reference, result['source_fps']))
+        result.update(valid_truth_frame_mask=sorted(truth),
+                      matched_frame_mask=sorted(f for f,r in records.items()
+                          if f in truth and r['position_cm'] is not None))
     if baseline_run is not None:
-        baseline_result, _, baseline_records = _analyse(Path(baseline_run), truth)
+        baseline_result, _, baseline_records = _analyse(Path(baseline_run), truth, reference, expected_frames)
         result['baseline_comparison'] = {
             'run': str(baseline_run),
             'definition': 'Both runs scored on exactly the same source frames with valid reference and estimate; no time shift or parameter selection. Observed-paired requires observed in both; all-estimate-paired permits predictions.',

@@ -128,7 +128,9 @@ class EngineTests(unittest.TestCase):
             last=records[-1]['world']
             self.assertIsNone(last['reference_point'])
             self.assertIsNone(last['position_cm'])
-            self.assertIsNotNone(last['body_center_cm'])
+            self.assertIsNone(last['body_center_cm'])
+            self.assertIsNotNone(last['internal_body_position_cm'])
+            self.assertEqual(last['internal_body_reference'], 'body_contact_proxy')
             self.assertTrue(all(r['world']['position_cm'] is None for r in records))
 
     def test_rejected_shape_does_not_poison_reference_for_later_image_bearings(self):

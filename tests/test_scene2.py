@@ -23,7 +23,7 @@ def test_scene2_calibration_and_video(tmp_path):
 
 
 def test_no_truth_report_preserves_missing_points(tmp_path):
-    (tmp_path / 'trajectory_m.csv').write_text('Frame,Time_s,X_m,Y_m,Z_m,state,method,reference_point\n0,0,1,2,3,measured,multi,center\n1,0.033,,,,lost,none,center\n2,0.066,2,3,4,predicted,filter,center\n')
+    (tmp_path / 'trajectory_m.csv').write_text('Frame,Time_s,X_m,Y_m,Z_m,state,method,reference_point\n0,0,1,2,3,observed,multi,cuboid_center\n1,0.033,,,,lost,none,cuboid_center\n2,0.066,2,3,4,predicted,filter,cuboid_center\n')
     result = write_prediction_report(tmp_path, 3)
     assert result['coordinate_frames'] == 2
     assert result['coordinate_coverage_pct'] == pytest.approx(200/3)

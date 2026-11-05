@@ -96,6 +96,10 @@ is retained when translating its position to the cab. No model means no front.
         return result
     result.update(position_cm=mapped['position_cm'], front_cm=mapped['front_cm'],
                   reference_point=mapped['reference_point'],
+                  covariance_cm2=mapped['covariance_cm2'],
+                  body_covariance_cm2=np.asarray(covariance_cm2).tolist(),
+                  uncertainty_kind='largest_axis_standard_deviation_not_calibrated_radius',
+                  reference_model_age_s=max(0., model_age_s),
                   uncertainty_m=math.sqrt(max(0., float(np.linalg.eigvalsh(
                       mapped['covariance_cm2']).max())))/100.)
     if result.get('predicted_position_cm') is not None:
