@@ -381,15 +381,20 @@ class ShapeTests(unittest.TestCase):
         self.assertIsNone(result)
         self.assertAlmostEqual(estimator._yaw, learned['yaw_rad'], delta=.001)
 
-    def test_rejected_pose_does_not_change_the_learned_shape(self):
-        # A rejected final shared-shape fit must not commit its tentative size sample.
+    def test_current_multiview_pose_is_not_vetoed_by_smoothed_dimensions(self):
+        # Both cameras agree on the current extent. Old shared dimensions must
+        # not force a monocular fallback; one sample also must not replace history.
         estimator = ShapeEstimator(self.rig)
         learned = self.learn(estimator)
-        bad = self.boxes([1300., 700., 400.], dimensions=[2000., 600., 900.])
-        self.assertIsNone(estimator.update(6, .6, bad, velocity_cm_s=self.direction * 400))
+        changed = self.boxes([1300., 700., 400.], dimensions=[2000., 600., 900.])
+        pose = estimator.update(6, .6, changed, velocity_cm_s=self.direction * 400)
+        self.assertEqual(pose['method'], 'cuboid_multiview')
+        np.testing.assert_allclose(pose['center_cm'], [1300.,700.,400.], atol=8.)
+        self.assertGreater(pose['dimensions_cm'][2], 880.)
+        np.testing.assert_allclose(pose['shared_dimensions_cm'], learned['dimensions_cm'], atol=1.)
         result = estimator.update(7, .7, self.boxes([1300., 700., 400.]),
                                   velocity_cm_s=self.direction * 400)
-        self.assertEqual(result['shape_samples'], learned['shape_samples'] + 1)
+        self.assertEqual(result['shape_samples'], learned['shape_samples'] + 2)
         np.testing.assert_allclose(result['dimensions_cm'], learned['dimensions_cm'], atol=1.)
 
     def test_motion_does_not_turn_a_degenerate_two_view_fit_into_learned_scale(self):

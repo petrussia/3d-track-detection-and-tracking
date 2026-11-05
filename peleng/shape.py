@@ -548,6 +548,7 @@ class ShapeEstimator:
         if not full_views:
             return None
         views = full_views
+        dimension_sample_accepted = False
         seed = self._seed(views)
         # The all-view ray seed may include a partial box that the robust fitter
         # will later reject. It cannot establish body motion or the front sign.
@@ -600,25 +601,14 @@ class ShapeEstimator:
                 return None
             if not self._validate_available_views(fit, all_views):
                 return None
-            previous_learning = (self._samples.copy(), self._sample_count,
-                                 None if self._dimensions is None else self._dimensions.copy(),
-                                 None if self._dimension_variance is None else self._dimension_variance.copy())
             if not fit['fixed']:
-                self._learn(fit)
-                consensus = fit.get('consensus')
-                fit = self._fit(views, fit['center'], heading, shared=self._dimensions, fixed=True)
-                if fit is not None and consensus is not None:
-                    support, residuals = self._support(fit, full_views)
-                    if not {v['camera_id'] for v in views}.issubset({v['camera_id'] for v in support}):
-                        fit = None
-                    else:
-                        fit['consensus'] = dict(consensus, normalized_rms_by_camera=residuals,
-                            supporting_cameras=[v['camera_id'] for v in support],
-                            rejected_cameras=[v['camera_id'] for v in full_views
-                                              if v['camera_id'] not in {s['camera_id'] for s in support}])
-            if fit is None:
-                self._samples, self._sample_count, self._dimensions, self._dimension_variance = previous_learning
-                fit, views = single_view_fallback(full_views)
+                # Current image-consistent pose and shared dimensions are distinct
+                # estimates. Refitting with the old smoothed dimensions creates a
+                # circular gate: the new sample cannot repair that same model.
+                # Keep the validated free-size pose even if learning rejects its
+                # size. SceneGeometry still commits history only after body
+                # acceptance, and all-view validation remains mandatory below.
+                dimension_sample_accepted = self._learn(fit)
         elif self._dimensions is not None:
             # Initial range follows learned physical height, not the motion prior.
             if seed is None:
@@ -711,6 +701,9 @@ class ShapeEstimator:
             'front_observable': front_observable, 'range_from_shape': not multi_view,
             'yaw_rad': yaw, 'yaw_sigma_rad': fit['yaw_sigma'],
             'dimensions_cm': (dimensions*100).tolist(),
+            'pose_dimension_source': 'shared_model' if fit['fixed'] else 'current_multiview_fit',
+            'dimension_sample_accepted': dimension_sample_accepted,
+            'shared_dimensions_cm': (self._dimensions*100).tolist(),
             'dimensions_learned': self._known_dimensions is not None or self._sample_count >= 3,
             'dimension_source': 'configured_asset_geometry' if self._known_dimensions is not None else 'causal_multiview_learning',
             'dimension_sigma_cm': (np.sqrt(self._dimension_variance)*100).tolist(),
